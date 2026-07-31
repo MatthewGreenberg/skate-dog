@@ -13,6 +13,20 @@ export const input = {
   reverse: false,
 }
 
+// Mobile layer, written by GameUI's joystick/jump button and merged with the
+// keys in sampleInput. The joystick reuses the same axes on purpose: in the
+// air steer IS spin, up IS grab and down IS kickflip, so one stick does every
+// trick without a second control.
+export const touch = { steer: 0, throttle: 0, reverse: false, jumpHeld: false }
+
+export function touchJumpDown() {
+  jumpEdge = true
+  touch.jumpHeld = true
+}
+export function touchJumpUp() {
+  touch.jumpHeld = false
+}
+
 const down = new Set()
 
 const KEYS = {
@@ -70,11 +84,12 @@ export function initInput() {
 const BUFFER = 0.14
 
 export function sampleInput(dt) {
-  input.steer = (down.has('right') ? 1 : 0) - (down.has('left') ? 1 : 0)
-  input.throttle = down.has('fwd') ? 1 : 0
-  input.reverse = down.has('back')
+  const keySteer = (down.has('right') ? 1 : 0) - (down.has('left') ? 1 : 0)
+  input.steer = Math.max(-1, Math.min(1, keySteer + touch.steer))
+  input.throttle = Math.max(down.has('fwd') ? 1 : 0, touch.throttle)
+  input.reverse = down.has('back') || touch.reverse
   input.brake = down.has('brake')
-  input.jumpHeld = down.has('jump')
+  input.jumpHeld = down.has('jump') || touch.jumpHeld
   input.spin = (down.has('spinR') ? 1 : 0) - (down.has('spinL') ? 1 : 0)
   input.grab = down.has('grab')
 

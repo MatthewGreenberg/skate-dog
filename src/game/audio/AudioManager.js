@@ -172,6 +172,26 @@ function sfxTrick(e) {
   })
 }
 
+// big-air shimmer: a glassy pentatonic run of detuned sine pairs over an airy
+// high-passed sparkle bed — magic-dust twinkle, deliberately not the trick
+// arpeggio so the moment reads as its own reward
+function sfxShimmer() {
+  if (!ctx) return
+  const t = ctx.currentTime, v = voice(1.1)
+  ;[1047, 1319, 1568, 2093, 2637].forEach((hz, i) => {
+    const t0 = t + i * 0.05
+    for (const det of [-7, 8]) {
+      const o = osc('sine', hz, det), g = gn(0)
+      env(g.gain, t0, 0.065, 0.01, 0.5)
+      o.connect(g); g.connect(v.g); o.start(t0); o.stop(t0 + 0.6); v.add(o, g)
+    }
+  })
+  const s = noise(false, false), f = flt('highpass', 5200), ng = gn(0)
+  env(ng.gain, t, 0.05, 0.06, 0.6)
+  s.connect(f); f.connect(ng); ng.connect(v.g)
+  s.start(t, Math.random() * 2); s.stop(t + 0.75); v.add(s, f, ng)
+}
+
 function sfxBail() {
   if (!ctx) return
   const t = ctx.currentTime, v = voice(0.9)
@@ -250,6 +270,8 @@ export function startAudio() {
   lastHalf = Math.floor((P.run || 0) / Math.PI)
   unsubs.push(
     on('jump', sfxJump), on('land', sfxLand), on('trick', sfxTrick), on('bail', sfxBail),
+    on('bone', ({ big }) => sfxTrick({ points: big ? 2500 : 700 })),
+    on('bigair', sfxShimmer),
     on('grind', (e) => {
       const active = !!(e && e.on)
       if (active === grinding || !ctx) return

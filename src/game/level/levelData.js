@@ -327,4 +327,28 @@ export const SHRUBS = (() => {
   return out
 })()
 
+// ---------------------------------------------------------------- bones
+// Floating collectibles (rendered/collected by components/Bones.jsx). Each is
+// parked on a specific line the park already teaches: heights are solved
+// against the measured movement numbers in PlayerController (flat ollie 1.28m,
+// qp1 coping ollie 3.9-6.0m over the 1.6 coping, rolling launch 1.0-2.4m) plus
+// the 1.1m collect radius on the body centre (feet + 0.45). bones.check.js
+// asserts the float band and spacing.
+export const BONES = [
+  // qp1 vert air — above rolling-launch reach (apex centre ~4.45), needs the
+  // coping ollie. Sits a hair inside the coping because launchOffLip drifts
+  // the air back over the transition.
+  { id: 'qp1Air', x: 18, y: 5.0, z: -11.5 },
+  // halfpipe: a pumped air over the north lip (lip 1.95; deck ollie alone tops
+  // out ~3.7 on the centre, so it wants wall-to-wall speed)
+  { id: 'pipeAir', x: -26, y: 3.75, z: 20.1 },
+  // mid-grind on r1 — 1.6 clears the rolling body centre (1.55 max at radius)
+  // but a grind (centre ~1.03) or a timed flat ollie takes it
+  { id: 'railMid', x: 11, y: 1.6, z: -4 },
+  // bowl deep-end air, just inside the rim at the depthPhase bearing
+  { id: 'bowlAir', x: -17.5, y: 1.6, z: -0.35 },
+  // the stairA gap — ollie off pad1's top edge and float the whole stair set
+  { id: 'stairGap', x: 1.5, y: 2.5, z: 13 },
+]
+
 export const SPAWN = { x: 0, z: 6, heading: -0.4 }

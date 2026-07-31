@@ -17,6 +17,7 @@ import Lighting from './Lighting.jsx'
 import Skatepark from './Skatepark.jsx'
 import Player from './Player.jsx'
 import Effects from './Effects.jsx'
+import Bones from './Bones.jsx'
 import CameraController from './CameraController.jsx'
 import PerformanceManager from './PerformanceManager.jsx'
 import GameUI from './GameUI.jsx'
@@ -292,6 +293,7 @@ export default function Game() {
         <Lighting />
         <Skatepark />
         <Player />
+        <Bones />
         <Effects />
         <PostFX />
         <PerformanceManager />

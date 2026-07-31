@@ -43,6 +43,10 @@ const CLEAN_BOOST = 0.1 // base momentum bonus
 const CLEAN_BOOST_AIR = 0.04 // extra per second of air, up to +0.08
 const CLEAN_CAP = 1.25 // of MAX_SPEED
 const COYOTE = 0.13
+// A flatground ollie is airborne ~0.69s (2*JUMP_V/G), so 1.0 needs a properly
+// pumped ramp/bowl air — the rainbow-sparkle "big air" celebration moment,
+// which also pays a Big Air bonus through scoreAir at landing.
+const BIG_AIR = 1.0
 const SNAP = 0.07 // how far below the surface counts as contact
 // Ground stickiness over convex lips is GEOMETRIC, not a constant: a real lip
 // drops ~speed*dt per substep (0.11m at 13 m/s), but a constant big enough for
@@ -91,6 +95,8 @@ const trick = {
   comboTimer: 0,
   grindTime: 0,
   grindBank: 0,
+  bigAir: false, // 'bigair' already emitted this air
+
   grindShown: 0, // multiplied points already added to the score this grind
   grindFlush: 0,
 }
@@ -131,6 +137,15 @@ export function updatePlayer(dt) {
     steps++
   }
   if (steps === MAX_STEPS) acc = 0
+  // Consume the sub-STEP remainder instead of banking it: whole steps alone
+  // advance the rendered pose by 1-3 steps per display frame depending on how
+  // rAF beats against the 8.33ms grid — an 11cm-per-step stutter at speed with
+  // a perfect frame rate. Safe as a variable-size step because every response
+  // in step() is rate-based and dt-scaled.
+  else if (acc > 0) {
+    step(acc)
+    acc = 0
+  }
   updateAnim(Math.min(dt, 0.1))
 }
 
@@ -411,6 +426,7 @@ function takeoff(fromJump) {
   P.groundTime = 0
   trick.fwdLatch = input.throttle > 0
   trick.grabbing = false // each air rolls a fresh grab style
+  trick.bigAir = false
   if (!fromJump) {
     trick.spinTotal = 0
     trick.dogSpins = 0
@@ -443,6 +459,10 @@ function doJump() {
 function stepAir(dt) {
   P.airTime += dt
   trick.air += dt
+  if (!trick.bigAir && trick.air > BIG_AIR) {
+    trick.bigAir = true
+    emit('bigair', { pos: P.pos })
+  }
 
   // No air throttle. It was 4.5 m/s^2 of free forward thrust with nothing
   // paying for it, and over a one-second vert air that is 4.8 m/s — more than
@@ -736,6 +756,11 @@ function scoreAir() {
     const g = GRAB_NAMES[P.grabStyle] || 'Grab'
     name = name ? `${name} + ${g}` : g
   }
+  if (trick.bigAir) {
+    // scales with hang time so a huge air pays more than a threshold graze
+    pts += 100 + Math.round(trick.air * 60)
+    name = name ? `${name} + Big Air` : 'Big Air'
+  }
   if (!name && trick.air > 0.55) {
     name = 'Ollie'
     pts = 30 + Math.round(trick.air * 40)
@@ -745,6 +770,7 @@ function scoreAir() {
   trick.dogSpins = 0
   trick.grabTime = 0
   trick.air = 0
+  trick.bigAir = false
   if (pts > 0) award(name, pts)
 }
 

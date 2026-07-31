@@ -1,8 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { useGame } from '../store.js'
+import { touch, touchJumpDown, touchJumpUp } from '../input.js'
 import { unlockAudio } from '../audio/AudioManager.js'
 import { PHOTO } from '../photo.js'
 import './ui.css'
+
+// coarse pointer = phone/tablet: show the joystick + jump button, swap the legend
+const TOUCH = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
 
 const NUM = new Intl.NumberFormat('en-US')
 
@@ -59,6 +63,24 @@ function ScorePill() {
   )
 }
 
+function BonesPill() {
+  const bones = useGame((s) => s.bones)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!bones || !ref.current) return
+    const el = ref.current
+    el.classList.remove('pop')
+    void el.offsetWidth
+    el.classList.add('pop')
+  }, [bones])
+  return (
+    <div className="hud-pill hud-bones" ref={ref}>
+      <BoneIcon />
+      <span className="hud-score-value">{bones}/5</span>
+    </div>
+  )
+}
+
 function TrickPopup() {
   const trickText = useGame((s) => s.trickText)
   const trickPoints = useGame((s) => s.trickPoints)
@@ -103,13 +125,79 @@ function TrickPopup() {
   )
 }
 
-const LEGEND = [
-  ['Space', 'jump'],
-  ['Arrows / WASD', 'move'],
-  ['↑ in air', 'grab'],
-  ['↓ in air', 'kickflip'],
-  ['← → in air', 'spin'],
-]
+function Joystick() {
+  const nubRef = useRef(null)
+  const drag = useRef(false)
+
+  const set = (e) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    let dx = (e.clientX - r.left - r.width / 2) / (r.width / 2)
+    let dy = (e.clientY - r.top - r.height / 2) / (r.height / 2)
+    const len = Math.hypot(dx, dy)
+    if (len > 1) {
+      dx /= len
+      dy /= len
+    }
+    // dead zones so a thumb resting up doesn't wobble the line or feather the gas
+    touch.steer = Math.abs(dx) > 0.16 ? dx : 0
+    touch.throttle = -dy > 0.15 ? Math.min(1, -dy * 1.2) : 0
+    touch.reverse = dy > 0.4
+    nubRef.current.style.transform = `translate(${dx * r.width * 0.3}px, ${dy * r.height * 0.3}px)`
+  }
+  const end = (e) => {
+    drag.current = false
+    touch.steer = 0
+    touch.throttle = 0
+    touch.reverse = false
+    if (nubRef.current) nubRef.current.style.transform = ''
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+  }
+  return (
+    <div
+      className="hud-stick"
+      onPointerDown={(e) => {
+        drag.current = true
+        e.currentTarget.setPointerCapture(e.pointerId)
+        set(e)
+      }}
+      onPointerMove={(e) => drag.current && set(e)}
+      onPointerUp={end}
+      onPointerCancel={end}
+    >
+      <div className="hud-stick-nub" ref={nubRef} />
+    </div>
+  )
+}
+
+function JumpButton() {
+  return (
+    <button
+      className="hud-jump"
+      onPointerDown={(e) => {
+        e.preventDefault()
+        touchJumpDown()
+      }}
+      onPointerUp={touchJumpUp}
+      onPointerCancel={touchJumpUp}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      JUMP
+    </button>
+  )
+}
+
+const LEGEND = TOUCH
+  ? [
+      ['Stick', 'move · spin · grab · flip'],
+      ['Button', 'jump'],
+    ]
+  : [
+      ['Space', 'jump'],
+      ['Arrows / WASD', 'move'],
+      ['↑ in air', 'grab'],
+      ['↓ in air', 'kickflip'],
+      ['← → in air', 'spin'],
+    ]
 
 function StartOverlay() {
   const onPlay = () => {
@@ -140,15 +228,22 @@ export default function GameUI() {
   // photo mode shows the in-play HUD with a representative score, never the
   // start card — the capture has to match a mid-session frame
   useEffect(() => {
-    if (PHOTO) useGame.setState({ score: 18720, started: true })
+    if (PHOTO) useGame.setState({ score: 18720, bones: 3, started: true })
   }, [])
   const live = started || !!PHOTO
   return (
     <div className="hud">
       <div className={live ? 'hud-widgets' : 'hud-widgets is-idle'}>
         <ScorePill />
+        <BonesPill />
       </div>
       <TrickPopup />
+      {live && TOUCH && (
+        <>
+          <Joystick />
+          <JumpButton />
+        </>
+      )}
       {!live && <StartOverlay />}
     </div>
   )

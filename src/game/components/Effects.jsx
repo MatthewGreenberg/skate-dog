@@ -97,6 +97,7 @@ const streakMat = new THREE.MeshBasicMaterial({
 const asRGB = (hexes) => hexes.map((h) => new THREE.Color(h).convertSRGBToLinear())
 const SPARK_COLS = asRGB(['#ffe14d', '#ff9d2e', '#ff5da2', '#4dd8ff', '#ffffff'])
 const STAR_COLS = asRGB(['#ffd94d', '#ffb347', '#ff6fb5', '#7de8ff'])
+const GOLD = asRGB(['#ffe14d', '#ffd94d', '#fff3b0', '#ffb347'])
 // full hue wheel for grind sparkles, kept light so every hue reads on concrete
 const RAINBOW = Array.from({ length: 12 }, (_, i) =>
   new THREE.Color().setHSL(i / 12, 1, 0.62).convertSRGBToLinear())
@@ -444,7 +445,7 @@ export default function Effects() {
   const starRef = useRef()
   const ringRef = useRef()
   const streakRef = useRef()
-  const t = useRef({ dust: 0, spark: 0, trail: 0, streak: 0, grindT: 0, grindStar: 0 })
+  const t = useRef({ dust: 0, spark: 0, trail: 0, streak: 0, grindT: 0, grindStar: 0, airStar: 0, bigAir: false })
 
   // Must be a layout effect: useFrame subscribes in a layout effect too, so a
   // frame can render (and upload instanceMatrix) before passive effects flush.
@@ -501,6 +502,33 @@ export default function Effects() {
       on('trick', ({ points = 100 }) => {
         const n = Math.min(8, 3 + Math.round(points / 150))
         starBurst(P.pos, isLow() ? Math.ceil(n / 2) : n, 1.6)
+      }),
+      on('bone', ({ pos, big }) => {
+        // all-gold burst: star fountain + spark scatter + surface shockwave
+        const n = (big ? 18 : 11) >> (isLow() ? 1 : 0)
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * TAU + rnd(0.3)
+          const cx = Math.cos(a)
+          const cz = Math.sin(a)
+          starAt(pos.x + cx * 0.18, pos.y + rnd(0.15), pos.z + cz * 0.18,
+            cx * (1.2 + Math.random()), 1.3 + Math.random() * 1.7, cz * (1.2 + Math.random()),
+            0.08 + Math.random() * 0.06, GOLD)
+          if (i % 2 === 0) sparkAt(pos.x, pos.y, pos.z, cx * 0.4, cz * 0.4, 0.6, GOLD)
+        }
+        ringAt(pos.x, pos.y, pos.z, big ? 0.8 : 0.5)
+      }),
+      on('bigair', ({ pos }) => {
+        // rainbow halo burst, then the frame loop streams sparkles until landing
+        t.current.bigAir = true
+        const n = isLow() ? 7 : 14
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * TAU + rnd(0.3)
+          const cx = Math.cos(a)
+          const cz = Math.sin(a)
+          starAt(pos.x + cx * 0.3, pos.y + 0.3 + rnd(0.2), pos.z + cz * 0.3,
+            cx * (1.4 + Math.random()), 0.8 + Math.random() * 1.4, cz * (1.4 + Math.random()),
+            0.08 + Math.random() * 0.05, RAINBOW)
+        }
       }),
       on('bail', ({ pos }) => {
         // classic dizzy-stars halo over the crash
@@ -568,6 +596,24 @@ export default function Effects() {
       t.current.spark = 0
       t.current.grindT = 0
       t.current.grindStar = 0
+    }
+
+    // big-air rainbow sparkle trail: streams off the dog from the 'bigair'
+    // moment until the wheels touch back down
+    if (t.current.bigAir && P.state === 'air') {
+      t.current.airStar += dt
+      const siv = (isLow() ? 0.12 : 0.06)
+      while (t.current.airStar >= siv) {
+        t.current.airStar -= siv
+        starAt(
+          P.pos.x + rnd(0.35), P.pos.y + 0.2 + rnd(0.25), P.pos.z + rnd(0.35),
+          rnd(0.8), -0.4 + rnd(0.5), rnd(0.8),
+          0.05 + Math.random() * 0.04, RAINBOW,
+        )
+      }
+    } else {
+      t.current.bigAir = false
+      t.current.airStar = 0
     }
 
     // anime speed streaks once the player is really moving (ground, air, grind)

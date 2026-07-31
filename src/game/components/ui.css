@@ -45,6 +45,10 @@
   left: var(--edge);
   min-width: calc(var(--u) * 11.5);
 }
+.hud-bones {
+  top: var(--edge);
+  right: var(--edge);
+}
 .hud-pill.pop {
   animation: hudPop 0.34s cubic-bezier(0.34, 1.56, 0.5, 1);
 }
@@ -212,6 +216,57 @@
 }
 .hud-play:active {
   transform: translateY(1px) scale(0.98);
+}
+
+/* ------------------------------------------------------------ touch */
+.hud-stick {
+  position: absolute;
+  left: calc(var(--edge) + env(safe-area-inset-left, 0px));
+  bottom: calc(var(--edge) + env(safe-area-inset-bottom, 0px));
+  width: calc(var(--u) * 10);
+  height: calc(var(--u) * 10);
+  border-radius: 50%;
+  border: var(--rim) solid rgba(255, 255, 255, 0.75);
+  background: radial-gradient(circle, rgba(96, 54, 160, 0.3), rgba(58, 28, 106, 0.5));
+  pointer-events: auto;
+  touch-action: none;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.hud-stick-nub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46%;
+  height: 46%;
+  margin: -23% 0 0 -23%;
+  border-radius: 50%;
+  background: linear-gradient(rgba(255, 255, 255, 0.95), rgba(228, 216, 255, 0.9));
+  box-shadow: 0 calc(var(--u) * 0.3) calc(var(--u) * 0.7) rgba(36, 14, 62, 0.4);
+}
+
+.hud-jump {
+  position: absolute;
+  right: calc(var(--edge) + env(safe-area-inset-right, 0px));
+  bottom: calc(var(--edge) + env(safe-area-inset-bottom, 0px));
+  width: calc(var(--u) * 7.5);
+  height: calc(var(--u) * 7.5);
+  border-radius: 50%;
+  border: var(--rim) solid rgba(255, 255, 255, 0.9);
+  background: linear-gradient(#9a6ee2, #6d3fc0);
+  color: #fff;
+  font-family: inherit;
+  font-size: calc(var(--u) * 1.15);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: pointer;
+  box-shadow: 0 calc(var(--u) * 0.5) calc(var(--u) * 1.1) rgba(46, 20, 78, 0.45),
+    inset 0 2px 0 rgba(255, 255, 255, 0.3);
+}
+.hud-jump:active {
+  transform: scale(0.93);
 }
 
 /* dev-only FPS panel — keep it out of the HUD's corners */

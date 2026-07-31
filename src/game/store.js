@@ -10,6 +10,7 @@ export const useGame = create((set, get) => ({
   score: 0,
   lives: 3,
   combo: 0,
+  bones: 0, // floating bones collected (of levelData BONES)
   trickText: '',
   trickPoints: 0,
   started: false,
@@ -23,6 +24,7 @@ export const useGame = create((set, get) => ({
   showTrick: (trickText, trickPoints) => set({ trickText, trickPoints }),
   clearTrick: () => set({ trickText: '', trickPoints: 0 }),
   setCombo: (combo) => set({ combo }),
+  collectBone: () => set({ bones: get().bones + 1 }),
   loseLife: () => set({ lives: Math.max(0, get().lives - 1) }),
 }))
 
@@ -97,3 +99,4 @@ export function emit(name, payload) {
 //   'spark'  { pos:Vector3, dir:Vector3 }
 //   'trick'  { name:string, points:number }
 //   'bail'   { pos:Vector3 }
+//   'bone'   { pos:Vector3, big:boolean }  collectible grabbed (big = last one)

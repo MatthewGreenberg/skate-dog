@@ -76,13 +76,37 @@ src/game/
     textures.js       every procedural map: albedo, normal, roughness, baked AO
     foliage.js        plant generation, pure data -> instance rows
   components/         Game (canvas + post), Lighting, Skatepark, Props, Player, Effects, UI
+                      GameUI also owns the mobile controls: on coarse-pointer
+                      devices a left joystick + right JUMP button write into
+                      input.js's `touch` state, merged with the keys in
+                      sampleInput. The stick deliberately maps to the SAME
+                      steer/throttle/reverse axes — in the air that already
+                      means spin/grab/kickflip, so one stick does every trick.
                       Effects.jsx = cartoon particle kit: rainbow grind sparks +
                       star-sparkle glitter (per-instance colour), star pops on
                       tricks/bails, shockwave rings on jump/grind-start (none on
                       land — rejected), anime speed streaks, dust, bowl carve
                       marks. All fixed-size instanced pools, zero alloc in
                       the frame loop; fades are scale-to-zero (no per-instance
-                      alpha). Grind sparks escalate with hold time.
+                      alpha). Grind sparks escalate with hold time. Big air:
+                      PlayerController emits 'bigair' once per air past 1.0s
+                      (a flat ollie is ~0.69s, so only pumped ramp/bowl airs
+                      fire) — rainbow star halo + a streaming rainbow trail
+                      until landing here, shimmer in AudioManager, and a
+                      hang-time-scaled Big Air bonus through scoreAir.
+                      Bones.jsx = 5 floating collectible bones (positions in
+                      levelData BONES, solved against the measured launch
+                      heights so each wants a specific line: qp1 coping ollie,
+                      pumped halfpipe air, r1 grind, bowl deep-end air, the
+                      stairA gap). One merged lathe+lobes geometry, ivory
+                      MeshPhysicalMaterial with clearcoat and a pulsing warm
+                      emissive held under the bloom threshold. Collection is a
+                      1.1m sphere on the body centre (P.pos + 0.45); collect
+                      pops the bone (overshoot, spin, rise, shrink), emits
+                      'bone' (gold star burst + ring in Effects, arpeggio in
+                      AudioManager), scores 500 (2500 + ALL BONES! on the 5th)
+                      and ticks the HUD bone pill. bones.check.js asserts the
+                      float band and spacing.
                       Rider.jsx = boy.glb + the pose table that drives it
                       Dog.jsx = dog_compressed.glb, fitted and posed the same way
                       clearCoat.js = swaps both rigs' standard materials for
@@ -101,12 +125,19 @@ src/game/
   audio/
     AudioManager.js   fully synthesised SFX, no files. Cartoon-styled: slide-whistle
                       jump/bail, boing landings, per-surface paw patter and
-                      rolling noise. There is deliberately NO dog voice — the
+                      rolling noise, glassy pentatonic shimmer on 'bigair'. There is deliberately NO dog voice — the
                       yip/whine generators and their four call sites were removed
                       by request; don't reintroduce barking on jump/trick/bail
                       or through a grind.
   player/
-    PlayerController.js  movement, tricks, grinding. Scoring: a grind claims
+    PlayerController.js  movement, tricks, grinding. updatePlayer consumes the
+                       sub-STEP accumulator remainder as one variable-size
+                       step: whole 1/120 steps alone advanced the rendered
+                       pose 1-3 steps per display frame (rAF beat against the
+                       8.33ms grid), an 11cm-per-step stutter at speed with a
+                       perfect frame rate. Safe because every response in
+                       step() is rate-based and dt-scaled.
+                       Scoring: a grind claims
                        its combo slot at lock-on and pays the score LIVE
                        (42 pts/s x the chain multiplier, flushed every 0.15s —
                        never per-frame store sets), settling the rounding
@@ -239,6 +270,7 @@ Plain `node`, no framework. Run them after touching what they cover.
 node src/game/level/foliage.check.js       # crowns, branch coverage, colour space
 node src/game/level/benches.check.js       # bench facing + footing vs walls/planters/decks
 node src/game/level/rails.check.js         # rail/post clearance vs walls, props, solids, other rails; lip-edge grinds
+node src/game/level/bones.check.js         # collectible bone float band + spacing
 node src/game/level/ramps.check.js         # every ramp + stair enterable, climbable, qp1 pops vert, early pop transfers to deck
 node src/game/level/collision.check.js     # ~40s: broad-phase coverage, wall penetration, ramp seams, drops, dt consistency, perimeter
 node src/game/player/steering.check.js

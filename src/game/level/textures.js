@@ -485,6 +485,131 @@ export function stoneNormal() {
   })
 }
 
+// -------------------------------------------------------------- ramp plywood
+// The halfpipe is a built wooden ramp, not park stone. Ramp UVs are authored
+// in plaza units (1 repeat = 8m), so a repeat of 4 is baked into the texture:
+// one canvas spans 2m of world and its 7 planks land at ~0.29m — sheet-ply
+// scale. Planks run along canvas y, which is v = the riding direction.
+export function woodMap() {
+  return cached('wood', () => {
+    const S = 1024
+    const [c, x] = canvas(S, S)
+    x.fillStyle = C.plyDark
+    x.fillRect(0, 0, S, S)
+    const N = 7
+    const pw = S / N
+    for (let i = 0; i < N; i++) {
+      // sample the low-mid band: the full ramp let half the planks land on
+      // plyPale and the sunlit surface washed out to near-white
+      x.fillStyle = rampAt(RAMP.wood, 0.12 + rnd(i, 0, 21) * 0.5)
+      x.fillRect(i * pw + 1.5, 0, pw - 3, S)
+      // long grain: wavy near-vertical strokes, dark and pale passes
+      for (let k = 0; k < 26; k++) {
+        const v = rnd(i, k, 22)
+        x.strokeStyle =
+          v > 0.6 ? `rgba(130,92,58,${0.05 + v * 0.07})` : `rgba(255,242,218,${0.04 + v * 0.05})`
+        x.lineWidth = 0.8 + v * 1.4
+        let gx = i * pw + 3 + rnd(i, k, 23) * (pw - 6)
+        x.beginPath()
+        x.moveTo(gx, -8)
+        for (let yy = 0; yy <= S; yy += 32) {
+          gx += (noise(i * 9 + k, yy / 90, 24) - 0.5) * 7
+          gx = Math.max(i * pw + 2.5, Math.min((i + 1) * pw - 2.5, gx))
+          x.lineTo(gx, yy)
+        }
+        x.stroke()
+      }
+      // the odd knot, drawn as nested rings so the grain reads as real wood
+      if (rnd(i, 9, 25) > 0.45) {
+        const kx = i * pw + pw * (0.25 + rnd(i, 10, 26) * 0.5)
+        const ky = rnd(i, 11, 27) * S
+        for (let r = 5; r > 0; r--) {
+          x.strokeStyle = `rgba(112,76,46,${0.1 + r * 0.035})`
+          x.lineWidth = 1.1
+          x.beginPath()
+          x.ellipse(kx, ky, r * 2.1, r * 3.4, 0, 0, 6.3)
+          x.stroke()
+        }
+      }
+      // staggered butt seams where sheets meet end to end
+      const sy = ((i * 0.37 + rnd(i, 12, 28) * 0.3) % 1) * S
+      x.fillStyle = 'rgba(105,72,45,0.45)'
+      x.fillRect(i * pw + 1.5, sy, pw - 3, 2)
+    }
+    // seam shadows between planks (i=0 and i=N clip at the edges, so the tile
+    // carries half a seam on each side and wraps clean)
+    x.fillStyle = 'rgba(105,72,45,0.5)'
+    for (let i = 0; i <= N; i++) x.fillRect(i * pw - 1, 0, 2, S)
+    mottle(x, S, S, 31, 0.045, 5)
+    grain(x, S, S, 9000, 0.03, 33)
+    return tex(c, 4)
+  })
+}
+
+// The riding surface: pale blue pressed sheet laid over the ply. 1m panels
+// (2 seams per 2m repeat), faint mottle and grain so the specular never sits
+// uniform across the face — a flat colour here reads as plastic.
+export function hpSurfMap() {
+  return cached('hpSurf', () => {
+    const S = 512
+    const [c, x] = canvas(S, S)
+    x.fillStyle = C.hpSurf
+    x.fillRect(0, 0, S, S)
+    // per-panel tone shift, quartered like the sheets themselves
+    for (let j = 0; j < 2; j++)
+      for (let i = 0; i < 2; i++) {
+        x.fillStyle = rnd(i, j, 51) > 0.5 ? C.hpSurf : C.hpSurfDark
+        x.globalAlpha = 0.25 + rnd(i, j, 52) * 0.2
+        x.fillRect((i * S) / 2, (j * S) / 2, S / 2, S / 2)
+      }
+    x.globalAlpha = 1
+    mottle(x, S, S, 61, 0.035, 6)
+    // panel seams both ways — sheet edges, drawn soft
+    x.fillStyle = 'rgba(90,120,140,0.3)'
+    for (const p of [0, S / 2]) {
+      x.fillRect(p, 0, 1.5, S)
+      x.fillRect(0, p, S, 1.5)
+    }
+    grain(x, S, S, 6000, 0.025, 63)
+    return tex(c, 4)
+  })
+}
+
+/** Plank relief: seams read as grooves, grain as faint long ridges. */
+export function woodNormal() {
+  return cached('woodN', () => {
+    const S = 512
+    const [c, x] = canvas(S, S)
+    const N = 7
+    const pw = S / N
+    for (let i = 0; i < N; i++) {
+      // slight per-plank height offset so adjacent sheets never sit dead flush
+      const g = 190 + Math.floor(rnd(i, 0, 41) * 40)
+      x.fillStyle = `rgb(${g},${g},${g})`
+      x.fillRect(i * pw, 0, pw, S)
+      for (let k = 0; k < 18; k++) {
+        const v = rnd(i, k, 42)
+        x.strokeStyle = `rgba(${v > 0.5 ? 255 : 90},${v > 0.5 ? 255 : 90},${v > 0.5 ? 255 : 90},0.10)`
+        x.lineWidth = 1
+        let gx = i * pw + 2 + rnd(i, k, 43) * (pw - 4)
+        x.beginPath()
+        x.moveTo(gx, 0)
+        for (let yy = 0; yy <= S; yy += 24) {
+          gx += (noise(i * 7 + k, yy / 70, 44) - 0.5) * 4
+          x.lineTo(gx, yy)
+        }
+        x.stroke()
+      }
+    }
+    x.fillStyle = '#000'
+    for (let i = 0; i <= N; i++) x.fillRect(i * pw - 1, 0, 2, S)
+    grain(x, S, S, 8000, 0.08, 45)
+    const t = normalFrom(c, 1.3)
+    t.repeat.set(4, 4)
+    return t
+  })
+}
+
 // -------------------------------------------------------------- bowl
 // The bowl is the hero surface of an entire camera framing, and it was the one
 // place the painted "sheen" ellipses actively hurt: a broad highlight baked into

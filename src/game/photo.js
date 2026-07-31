@@ -43,6 +43,13 @@ export const POSES = {
     fov: 34,
     player: { x: -29.0, y: 0, z: -12.0, heading: -0.8 },
   },
+  // halfpipe three-quarter: both quarters, decks and coping in frame
+  pipe: {
+    pos: [-11.5, 8.5, 37.0],
+    look: [-26.0, 1.2, 24.5],
+    fov: 32,
+    player: { x: -26.0, y: 0.35, z: 24.5, heading: Math.PI },
+  },
   // deck / stairs / rail architecture
   deck: {
     pos: [10.5, 15.0, 6.0],

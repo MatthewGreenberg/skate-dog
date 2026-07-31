@@ -536,8 +536,8 @@ export default function Effects() {
       t.current.dust = 0
     }
 
-    // rail contact sparks — the fountain escalates the longer the grind holds,
-    // matching the audio's escalating yips
+    // rail contact sparks — the fountain escalates the longer the grind holds
+    // (it used to be matched by escalating yips; the dog voice is gone)
     if (P.state === 'grind') {
       t.current.grindT += dt
       const heat = Math.min(1, t.current.grindT / 1.6)

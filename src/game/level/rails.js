@@ -2,9 +2,90 @@
 // grinding is just "advance s along the path" — no physics, no jitter.
 
 import * as THREE from 'three'
-import { RAILS } from './levelData.js'
+import { RAILS, WALLS, PLANTERS } from './levelData.js'
 
-export const PATHS = RAILS.map((r) => {
+// ---------------------------------------------------------------- lip edges
+// Every wall cap and planter rim is grindable. These are derived, not authored:
+// the lip you can already see IS the path, so nothing new is drawn and
+// Skatepark still renders only RAILS. Ends are trimmed so a lock-on can't
+// happen out past a corner, hanging the dog off the end of the lip.
+const TRIM = 0.35
+const EDGE_IN = 0.06 // how far in from the lip the path sits
+// The drawn stone overhangs the masonry it caps — Skatepark's wall cap is
+// w + 0.18, Props' planter rim spans p.w + 0.24. Offsetting off the raw box
+// would put the grind line a hand's width inside the visible lip.
+const CAP_OUT = 0.09
+const RIM_OUT = 0.12
+
+function lipEdges() {
+  const out = []
+  WALLS.forEach((w, i) => {
+    // levelData yaws local +Z to (sin rot, cos rot), so local +X is
+    // (cos rot, -sin rot). Both top EDGES, not the centreline: you grind the
+    // lip with the dog's side hanging over the face, the way a board does.
+    // A centreline path put the whole dog in the middle of the cap. They sit
+    // ~1.1 apart, so each edge is comfortably the nearest one from its own
+    // side and they never fight over a lock-on.
+    const alongZ = w.d >= w.w
+    const half = (alongZ ? w.d : w.w) / 2 - TRIM
+    if (half < 0.5) return // a stub cap (the deck-front dividers) is not a line
+    const c = Math.cos(w.rot)
+    const s = Math.sin(w.rot)
+    const ax = alongZ ? s : c
+    const az = alongZ ? c : -s
+    // sideways offset to the lip, pulled in EDGE_IN so the path is on the
+    // stone rather than off the corner in mid-air
+    const off = (alongZ ? w.w : w.d) / 2 + CAP_OUT - EDGE_IN
+    const bx = alongZ ? c : s
+    const bz = alongZ ? -s : c
+    // Skatepark puts the cap's top at w.h absolutely (bodyH = h - base - capH),
+    // so `base` does NOT add here.
+    const y = w.h
+    for (const side of [-1, 1]) {
+      const ox = bx * off * side
+      const oz = bz * off * side
+      out.push({
+        id: `wallcap${i}_${side > 0 ? 'a' : 'b'}`,
+        pts: [
+          [w.x + ox - ax * half, y, w.z + oz - az * half],
+          [w.x + ox + ax * half, y, w.z + oz + az * half],
+        ],
+      })
+    }
+  })
+  PLANTERS.forEach((p, i) => {
+    const y = (p.base || 0) + p.h
+    const hx = p.w / 2 + RIM_OUT - EDGE_IN
+    const hz = p.d / 2 + RIM_OUT - EDGE_IN
+    // Four separate runs, not one closed loop: a loop would snap the heading
+    // 90 degrees at every corner. You grind a side and pop off the end.
+    const corners = [
+      [-hx, -hz],
+      [hx, -hz],
+      [hx, hz],
+      [-hx, hz],
+    ]
+    for (let k = 0; k < 4; k++) {
+      const a = corners[k]
+      const b = corners[(k + 1) % 4]
+      const t = TRIM
+      const ux = Math.sign(b[0] - a[0])
+      const uz = Math.sign(b[1] - a[1])
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]) - 2 * t
+      if (len < 1) continue
+      out.push({
+        id: `planter${i}_${k}`,
+        pts: [
+          [p.x + a[0] + ux * t, y, p.z + a[1] + uz * t],
+          [p.x + a[0] + ux * (t + len), y, p.z + a[1] + uz * (t + len)],
+        ],
+      })
+    }
+  })
+  return out
+}
+
+export const PATHS = [...RAILS, ...lipEdges()].map((r) => {
   const pts = r.pts.map((p) => new THREE.Vector3(p[0], p[1], p[2]))
   const segs = []
   let len = 0

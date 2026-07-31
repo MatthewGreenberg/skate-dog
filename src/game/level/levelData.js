@@ -12,6 +12,12 @@
 export const DECK = 1.6 // back-right raised deck
 export const PAD1 = 1.2 // mid-plaza raised pad
 export const PAD2 = 0.9 // south low deck
+export const HP_BASE = 0.35 // halfpipe platform height — must stay under STEP_UP (0.55)
+
+// The perimeter tree/shrub rings are ellipses that dip INSIDE the rectangular
+// play area at its corners — exactly where the halfpipe sits. Keep-out box.
+const HP_CLEAR = { minX: -31.5, maxX: -20.5, minZ: 18, maxZ: 31 }
+const inHpClear = (x, z) => x > HP_CLEAR.minX && x < HP_CLEAR.maxX && z > HP_CLEAR.minZ && z < HP_CLEAR.maxZ
 
 // ---------------------------------------------------------------- bowl
 // Kidney footprint as a polar radius function around (cx, cz).
@@ -55,18 +61,49 @@ export const SOLIDS = [
   box({ id: 'pad2', x: 2, z: 26, w: 20, d: 8, top: PAD2, style: 'deck' }),
 
   // ---- ledges / manual pads --------------------------------------------
-  box({ id: 'ledge1', x: 11, z: 5, w: 11, d: 1.9, top: 0.42, style: 'ledge' }),
-  box({ id: 'ledge2', x: 19, z: 13, w: 10, d: 1.9, top: 0.42, style: 'ledge' }),
-  box({ id: 'ledge3', x: -3, z: -12, w: 1.9, d: 8, top: 0.42, style: 'ledge' }),
+  // ledge2 (19,13), ledge3 (-3,-12) and the two mid-plaza planters are gone —
+  // the centre read as a field of random squares. ledge1 is the one grind
+  // feature left there, stretched to match its longer rail.
+  box({ id: 'ledge1', x: 11, z: 5, w: 15, d: 1.9, top: 0.42, style: 'ledge' }),
   box({ id: 'ledge4', x: 17, z: -20, w: 9, d: 1.8, base: DECK, top: DECK + 0.42, style: 'ledge' }),
 
   // ---- transitions (uphill = local +Z) ---------------------------------
   ramp({ id: 'qp1', x: 18, z: -10.8, w: 9, d: 2.4, rot: Math.PI, y0: 0, y1: DECK, curve: 'quarter' }),
-  ramp({ id: 'bank1', x: 29.5, z: -10.2, w: 9, d: 3.6, rot: Math.PI, y0: 0, y1: DECK }),
+  // bank1 was here (x 29.5, z -10.2, rising 0 -> DECK) and it was dead geometry:
+  // deckB spans x 26..34, z -12..0 with its top already AT DECK, so the ramp was
+  // buried inside the slab — invisible, and its only approach ran through 4m of
+  // solid deck. There is no face left to move it to (deckA is walled west and
+  // north, its south face is stairB + qp1 between two dividers, and deckB is a
+  // walled platform already fed by stairC and bank2), so it is gone rather than
+  // sitting in the collider grid pretending to be a transition.
   ramp({ id: 'bank2', x: 24.2, z: -2.4, w: 4, d: 3.6, rot: Math.PI / 2, y0: 0, y1: DECK }),
   ramp({ id: 'bank3', x: -17.6, z: 16.5, w: 6.5, d: 3.2, rot: Math.PI / 2, y0: 0, y1: PAD1 }),
   ramp({ id: 'bank4', x: -3.5, z: 20.4, w: 7, d: 3.2, rot: 0, y0: 0, y1: PAD2 }),
   ramp({ id: 'bank5', x: 8.5, z: 20.6, w: 6, d: 2.8, rot: 0, y0: 0, y1: PAD2, curve: 'quarter' }),
+
+  // ---- halfpipe ---------------------------------------------------------
+  // Two facing quarters on a raised solid platform in the south-west corner,
+  // 4.6m of flat between the low edges. The 0.35 base is under STEP_UP (0.55)
+  // so you roll straight onto it; the quarters ride from the platform top.
+  // style 'solid' renders the ridden surface (quarter faces + hpDeck top) in
+  // pale blue sheet (hpSurfMap) over a birch plywood structure (woodMap) —
+  // it reads as a built wooden ramp. Approached from
+  // behind, a quarter's footprint reads as a wall at its top height (rampTopAt
+  // measures the nearest edge), which is what a halfpipe's back should do.
+  // All four boxes share the quarters' width (8) and style 'solid' so the
+  // platform, transitions and top decks render flush in the same plywood —
+  // at the old w:9 the masonry deck slabs stuck 0.5m past the ramp faces and
+  // the whole structure read as a walled courtyard, not one U-shaped ramp.
+  box({ id: 'hpDeck', x: -26, z: 24.5, w: 8, d: 10.4, top: HP_BASE, style: 'solid' }),
+  ramp({ id: 'hpN', x: -26, z: 21, w: 8, d: 2.4, rot: Math.PI, y0: HP_BASE, y1: HP_BASE + DECK, curve: 'quarter', style: 'solid' }),
+  ramp({ id: 'hpS', x: -26, z: 28, w: 8, d: 2.4, rot: 0, y0: HP_BASE, y1: HP_BASE + DECK, curve: 'quarter', style: 'solid' }),
+  // Top decks behind the coping, like a real vert ramp. Without them the
+  // quarter is zero-thickness at its lip, and a dog CRESTING slowly straddles
+  // the top with half its body printed out the back face — a lift can't fix
+  // "the surface ends here". The ramp collider's 1m top overhang hands off to
+  // these seamlessly; qp1 never had the problem because deckA is its deck.
+  box({ id: 'hpDeckN', x: -26, z: 19.1, w: 8, d: 1.4, top: HP_BASE + DECK, style: 'solid' }),
+  box({ id: 'hpDeckS', x: -26, z: 29.9, w: 8, d: 1.4, top: HP_BASE + DECK, style: 'solid' }),
 
   // ---- stairs -----------------------------------------------------------
   stair({ id: 'stairA', x: 0.5, z: 13, w: 5.4, d: 5, rot: -Math.PI / 2, y0: 0, y1: PAD1, steps: 6 }),
@@ -138,12 +175,10 @@ export const PLANTERS = [
   { x: 9, z: -28, w: 5, d: 4, base: DECK, h: 0.95, plant: 'tree' },
   { x: 30, z: -28, w: 4, d: 4, base: DECK, h: 0.95, plant: 'tree' },
   { x: 30, z: -16.5, w: 4, d: 3, base: DECK, h: 0.95, plant: 'flowers' },
-  { x: 2.5, z: -8.5, w: 3.4, d: 3.4, h: 0.95, plant: 'flowers' },
   { x: 14.5, z: -15.2, w: 3, d: 2.6, base: DECK, h: 0.95, plant: 'flowers' },
   { x: -18.5, z: 9.8, w: 3, d: 2.6, h: 0.95, plant: 'flowers' },
   { x: 27.5, z: 7.5, w: 4, d: 3.4, h: 0.95, plant: 'tree' },
   { x: 15.5, z: 21.5, w: 5, d: 3.4, h: 0.95, plant: 'flowers' },
-  { x: -1.5, z: 5.5, w: 3, d: 3, h: 0.95, plant: 'flowers' },
   { x: -24, z: -30, w: 6, d: 4, h: 0.95, plant: 'tree' },
   { x: 21.5, z: -14.6, w: 3, d: 2.6, base: DECK, h: 0.95, plant: 'flowers' },
   { x: -34, z: 16, w: 5, d: 6, h: 0.95, plant: 'tree' },
@@ -156,12 +191,23 @@ export const PERIMETER = { minX: -37, maxX: 37, minZ: -35, maxZ: 33 }
 // shadow.
 export const GRASS_Y = -0.3
 
+// Play area plus the masonry kerb ringing it (kerb spans out to ~1.9 past
+// PERIMETER; 2.2 adds trunk clearance). Perimeter foliage must root outside
+// this — the ring ellipses dip inside the rectangle at its corners.
+const KERB_OUT = 2.2
+const inPlayBand = (x, z) =>
+  x > PERIMETER.minX - KERB_OUT &&
+  x < PERIMETER.maxX + KERB_OUT &&
+  z > PERIMETER.minZ - KERB_OUT &&
+  z < PERIMETER.maxZ + KERB_OUT
+
 // ---------------------------------------------------------------- rails
 export const RAILS = [
-  { id: 'r1', color: 'railTeal', posts: 'flat', pts: [[4, 0.58, -4], [15, 0.58, -4]] },
-  { id: 'r2', color: 'railPink', posts: 'ledge', pts: [[6.2, 0.95, 5], [15.8, 0.95, 5]] },
-  { id: 'r3', color: 'railTeal', posts: 'ledge', pts: [[14.4, 0.95, 13], [23.6, 0.95, 13]] },
-  { id: 'r4', color: 'railYellow', posts: 'flat', pts: [[-6, 0.58, -16], [-6, 0.58, -8]] },
+  // r1/r4 stretched and r3's ledge deleted outright: the opened-up centre
+  // trades square clutter for longer grind lines.
+  { id: 'r1', color: 'railTeal', posts: 'flat', pts: [[2, 0.58, -4], [20, 0.58, -4]] },
+  { id: 'r2', color: 'railPink', posts: 'ledge', pts: [[4.4, 0.95, 5], [17.6, 0.95, 5]] },
+  { id: 'r4', color: 'railYellow', posts: 'flat', pts: [[-6, 0.58, -18], [-6, 0.58, -4]] },
   { id: 'r5', color: 'railTeal', posts: 'flat', pts: [[27, DECK + 0.58, -27], [27, DECK + 0.58, -17]] },
   { id: 'r6', color: 'railPink', posts: 'ledge', pts: [[13.2, DECK + 0.95, -20], [20.8, DECK + 0.95, -20]] },
 ]
@@ -248,13 +294,15 @@ export const TREES = (() => {
     for (let i = 0; i < n; i++) {
       const t = ((i + rnd() * 0.7) / n) * Math.PI * 2
       const k = 1.06 + ring * 0.16 + rnd() * 0.09
-      out.push({
-        x: cx + Math.cos(t) * ((P.maxX - P.minX) / 2) * k,
-        z: cz + Math.sin(t) * ((P.maxZ - P.minZ) / 2) * k,
-        base: GRASS_Y,
-        s: 0.75 + rnd() * 0.85,
-        r: rnd() * 6.28,
-      })
+      const x = cx + Math.cos(t) * ((P.maxX - P.minX) / 2) * k
+      const z = cz + Math.sin(t) * ((P.maxZ - P.minZ) / 2) * k
+      if (inHpClear(x, z)) continue
+      // No lone trees inside the play area or on the kerb ringing it — trees
+      // belong to the grass band or a planter bed. The ellipse dips inside the
+      // rectangle at all four corners, and the kerb runs ~1.9m outside
+      // PERIMETER (Skatepark's Kerb: centre ±1.4, half-width 0.5 + cap).
+      if (inPlayBand(x, z)) continue
+      out.push({ x, z, base: GRASS_Y, s: 0.75 + rnd() * 0.85, r: rnd() * 6.28 })
     }
   }
   return out
@@ -271,13 +319,10 @@ export const SHRUBS = (() => {
   for (let i = 0; i < 150; i++) {
     const t = (i / 150) * Math.PI * 2 + rnd() * 0.1
     const k = 1.0 + rnd() * 0.22
-    out.push({
-      x: cx + Math.cos(t) * ((P.maxX - P.minX) / 2) * k,
-      z: cz + Math.sin(t) * ((P.maxZ - P.minZ) / 2) * k,
-      base: GRASS_Y,
-      s: 0.7 + rnd() * 0.7,
-      r: rnd() * 6.28,
-    })
+    const x = cx + Math.cos(t) * ((P.maxX - P.minX) / 2) * k
+    const z = cz + Math.sin(t) * ((P.maxZ - P.minZ) / 2) * k
+    if (inHpClear(x, z) || inPlayBand(x, z)) continue
+    out.push({ x, z, base: GRASS_Y, s: 0.7 + rnd() * 0.7, r: rnd() * 6.28 })
   }
   return out
 })()

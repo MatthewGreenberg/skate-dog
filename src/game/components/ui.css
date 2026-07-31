@@ -139,7 +139,13 @@
   left: 50%;
   text-align: center;
   transform: translateX(-50%);
-  animation: hudTrick 1.1s cubic-bezier(0.16, 0.9, 0.28, 1) forwards;
+  /* pop-in only. The fly-out is a separate .out animation added by GameUI when
+     updates stop — a single 1.1s in+out keyframe faded the popup to opacity 0
+     mid-grind while the live counter was still ticking underneath it. */
+  animation: hudTrickIn 0.3s cubic-bezier(0.16, 0.9, 0.28, 1) both;
+}
+.hud-trick.out {
+  animation: hudTrickOut 0.42s ease-in forwards;
 }
 .hud-trick-name {
   color: #fff;
@@ -160,11 +166,13 @@
   text-shadow: 0 calc(var(--u) * 0.14) 0 rgba(92, 46, 156, 0.9),
     0 calc(var(--u) * 0.4) calc(var(--u) * 0.9) rgba(50, 20, 92, 0.55);
 }
-@keyframes hudTrick {
+@keyframes hudTrickIn {
   0% { opacity: 0; transform: translate(-50%, 14%) scale(0.68); }
-  14% { opacity: 1; transform: translate(-50%, -4%) scale(1.1); }
-  26% { transform: translate(-50%, 0) scale(1); }
-  62% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  54% { opacity: 1; transform: translate(-50%, -4%) scale(1.1); }
+  100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+@keyframes hudTrickOut {
+  0% { opacity: 1; transform: translate(-50%, 0) scale(1); }
   100% { opacity: 0; transform: translate(-50%, -70%) scale(0.98); }
 }
 

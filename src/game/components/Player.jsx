@@ -28,6 +28,8 @@ export default function Player() {
     const g = root.current
     if (!g) return
     g.position.copy(P.pos)
+    // curvature lift: keeps the long dog's nose/tail out of tight transitions
+    g.position.addScaledVector(P.up, P.surfLift)
     g.quaternion.copy(P.quat)
   })
   return (

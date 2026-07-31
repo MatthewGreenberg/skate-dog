@@ -137,6 +137,19 @@ export const C = {
   stone: '#ead0c2',
   stoneDark: '#cdaca1',
 
+  // halfpipe plywood — pale birch sheet. Warmer and yellower than the
+  // limestone caps but still in the pastel band; benchWood is the dark rung.
+  ply: '#e2c193',
+  plyDark: '#c7a179',
+  plyLight: '#f0d9b0',
+  plyPale: '#f7e6c6',
+  plySeam: '#a97f58',
+
+  // halfpipe riding surface — pale sky-blue sheet (skatelite over the ply),
+  // sitting between the teal rails and the lavender masonry in hue.
+  hpSurf: '#8fc0d8',
+  hpSurfDark: '#76abc7',
+
   // rails ------------------------------------------------------------------
   // Reference rails are pastel enamel: high value, moderate saturation, with a
   // crisp specular line along the top of the tube. Ours were a stop too dark
@@ -254,6 +267,7 @@ export const RAMP = {
   masonryBlocks: [C.wall, C.wallAlt, C.wallPink, C.wallCool, C.wallStone],
   plaza: [C.plazaGrout, C.plazaAlt, C.plazaCool, C.plaza, C.plazaWarm],
   stone: [C.stoneDark, C.capAlt, C.stone, C.cap],
+  wood: [C.plyDark, C.ply, C.plyLight, C.plyPale],
   // four stops, not two: the reference canopy has a genuinely dark interior
   leaf: [shade(C.leafDark), C.leafDark, C.leaf, C.leafLight],
   flower: [C.flowerWhite, C.flowerPink, C.flowerYellow],
@@ -363,6 +377,7 @@ export const M = {
   // gave it the wrong specular
   coping: { roughness: 0.42, metalness: 0.0 }, // worn smooth by decades of trucks
   wood: { roughness: 0.66, metalness: 0.0 }, // varnished bench slats
+  hpSurf: { roughness: 0.42, metalness: 0.0 }, // pressed sheet surface, smoother than the ply it covers
   bark: { roughness: 0.92, metalness: 0.0 },
   soil: { roughness: 0.98, metalness: 0.0 },
   skin: { roughness: 0.68, metalness: 0.0 },

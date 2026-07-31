@@ -90,19 +90,35 @@ function TrickPopup() {
   const trickText = useGame((s) => s.trickText)
   const trickPoints = useGame((s) => s.trickPoints)
   const ref = useRef(null)
+  const prevText = useRef('')
 
   useEffect(() => {
-    if (!trickText) return
+    if (!trickText) {
+      prevText.current = ''
+      return
+    }
+    // Restart the pop-in only when the NAME changes. A live grind flushes new
+    // points every 0.15s under the same name — restarting on points made the
+    // popup strobe instead of reading as a counter ticking up.
     const el = ref.current
     if (el) {
-      el.style.animation = 'none'
-      void el.offsetWidth
-      el.style.animation = ''
+      el.classList.remove('out')
+      if (trickText !== prevText.current) {
+        el.style.animation = 'none'
+        void el.offsetWidth
+        el.style.animation = ''
+      }
     }
-    const t = setTimeout(() => useGame.getState().clearTrick(), 1100)
-    return () => clearTimeout(t)
-    // trickPoints is a dep so a back-to-back trick with the same name but a
-    // different score still restarts the animation and the 1.1s clear timer.
+    prevText.current = trickText
+    // trickPoints is a dep so every flush pushes both timers back: the popup
+    // holds while the counter moves, flies out 1.1s after it stops, and only
+    // unmounts once the fly-out has played.
+    const tOut = setTimeout(() => ref.current && ref.current.classList.add('out'), 1100)
+    const tClear = setTimeout(() => useGame.getState().clearTrick(), 1520)
+    return () => {
+      clearTimeout(tOut)
+      clearTimeout(tClear)
+    }
   }, [trickText, trickPoints])
 
   if (!trickText) return null

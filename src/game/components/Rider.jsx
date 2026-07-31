@@ -17,7 +17,9 @@ import { buildRig, setBone, eulerDelta, armDelta, elbowDelta } from '../player/b
 import { BACK_Y } from './Dog.jsx'
 
 const URL = '/boy.glb'
-useGLTF.preload(URL)
+// Draco-compressed (34MB -> 4.1MB), decoder served locally like the dog's.
+const DRACO_PATH = '/draco/'
+useGLTF.preload(URL, DRACO_PATH)
 
 // The model is authored 1.0 units tall and the old procedural boy stood ~1.02
 // in this same parent, so nothing rescales. Limb lengths come off the bind pose
@@ -29,13 +31,41 @@ const PELVIS_FREE = 0.3 // pelvis height when the legs are not carrying weight
 // forearm forward. plant: how much the feet carry weight. gait: how much the
 // dog's run cycle shows in the arms.
 const POSES = {
-  ride:  { hipL: -0.36, kneeL: 0.30, hipR: 0.26, kneeR: 0.20, aLr: 1.42, aLs: -0.26, aLe: -0.30, aRr: 1.42, aRs: -0.26, aRe: -0.30, torso: 0.10, plant: 1, gait: 1 },
-  tuck:  { hipL: -0.78, kneeL: 0.80, hipR: 0.62, kneeR: 0.58, aLr: 0.42, aLs: -0.55, aLe: -1.15, aRr: 0.42, aRs: -0.55, aRe: -1.15, torso: 0.34, plant: 1, gait: 0.3 },
-  air:   { hipL: -1.15, kneeL: 1.25, hipR: -0.55, kneeR: 1.40, aLr: 2.45, aLs: -0.14, aLe: -0.18, aRr: 2.45, aRs: 0.08, aRe: -0.18, torso: -0.14, plant: 0, gait: 0 },
-  grab:  { hipL: -1.25, kneeL: 1.55, hipR: -0.95, kneeR: 1.6, aLr: 2.6, aLs: 0.2, aLe: -0.3, aRr: -0.42, aRs: -0.7, aRe: -0.1, torso: 0.44, plant: 0, gait: 0 },
-  grind: { hipL: -0.98, kneeL: 1.15, hipR: 0.82, kneeR: 0.92, aLr: 1.78, aLs: 0.0, aLe: -0.04, aRr: 1.78, aRs: 0.0, aRe: -0.04, torso: 0.3, plant: 1, gait: 0.2 },
-  land:  { hipL: -1.05, kneeL: 1.25, hipR: 0.88, kneeR: 1.00, aLr: 0.75, aLs: -0.95, aLe: -0.55, aRr: 0.75, aRs: -0.95, aRe: -0.55, torso: 0.45, plant: 1, gait: 0 },
-  bail:  { hipL: 0.25, kneeL: 0.55, hipR: -0.35, kneeR: 0.80, aLr: 2.40, aLs: 0.25, aLe: -0.85, aRr: 2.35, aRs: -0.20, aRe: -0.95, torso: -0.55, plant: 0.25, gait: 0 },
+  ride:  { hipL: -0.36, kneeL: 0.30, hipR: 0.26, kneeR: 0.20, aLr: 1.42, aLs: -0.26, aLe: -0.30, aRr: 1.42, aRs: -0.26, aRe: -0.30, torso: 0.10, plant: 1, gait: 1, duck: 0 },
+  tuck:  { hipL: -0.78, kneeL: 0.80, hipR: 0.62, kneeR: 0.58, aLr: 0.42, aLs: -0.55, aLe: -1.15, aRr: 0.42, aRs: -0.55, aRe: -1.15, torso: 0.34, plant: 1, gait: 0.3, duck: 0 },
+  air:   { hipL: -1.15, kneeL: 1.25, hipR: -0.55, kneeR: 1.40, aLr: 2.45, aLs: -0.14, aLe: -0.18, aRr: 2.45, aRs: 0.08, aRe: -0.18, torso: -0.14, plant: 0, gait: 0, duck: 0 },
+  // grab_* poses pair with Dog.jsx's GRABS table (same style keys); a fresh
+  // grab press in PlayerController rolls one at random.
+  // nose grab (ref: Nosegrab.webp): knees fully compressed over the pulled-up
+  // dog, right arm straight down-and-forward to the nose, left arm thrown out
+  // level for balance. duck sinks the pelvis so hand and dog actually meet.
+  grab_nose: { hipL: -1.35, kneeL: 1.7, hipR: -1.1, kneeR: 1.7, aLr: 1.6, aLs: 0.1, aLe: -0.15, aRr: -0.15, aRs: -1.05, aRe: -0.05, torso: 0.5, plant: 0, gait: 0, duck: 0.16 },
+  // tail grab: reach BACK with the LEFT hand to the raised tail while the dog's
+  // nose drops away — the mirror of the nose grab in hand, direction and shape.
+  // Front (left) leg bones out nearly straight after the dropping nose; rear
+  // (right) knee folds hard under the lifted rump; free right arm is thrown
+  // forward-and-up. Body extended, not compressed: duck is half the nose grab's.
+  grab_tail: { hipL: -0.58, kneeL: 0.20, hipR: -1.35, kneeR: 1.40, aLr: 0.22, aLs: 0.72, aLe: -0.22, aRr: 2.60, aRs: -0.45, aRe: -0.30, torso: 0.24, plant: 0, gait: 0, duck: 0.13 },
+  // indy: right hand punched straight DOWN and OUT to the dog's flank between
+  // the feet (positive aRr abducts outward — the lateral reach the tweak
+  // needs), front leg folded forward, trailing leg cranked back and up, left
+  // arm thrown high and wide. Nothing is centred — the whole silhouette leans
+  // out over the grab side while the dog pokes sideways under it.
+  grab_indy: { hipL: -1.45, kneeL: 1.95, hipR: 0.30, kneeR: 2.00, aLr: 2.25, aLs: 0.30, aLe: -0.45, aRr: 0.42, aRs: -0.15, aRe: -0.12, torso: 0.08, plant: 0, gait: 0, duck: 0.18 },
+  // method air: the opposite silhouette to the nose grab — spine arched BACK
+  // (torso negative), chest open to the sky, both legs kicked back and folded
+  // so the dog rides up behind the hips, front leg boned out long and the rear
+  // knee snapped to the butt. Leading (left) hand reaches down-and-behind to the
+  // near edge; free arm thrown high and forward. duck matches the nose grab's
+  // 0.16 — not to compress the pose, but because the arm is only 0.20 long.
+  grab_method: { hipL: 1.05, kneeL: 1.05, hipR: 0.68, kneeR: 1.62, aLr: 0.18, aLs: 1.15, aLe: -0.45, aRr: 2.55, aRs: -0.22, aRe: -0.20, torso: -0.38, plant: 0, gait: 0, duck: 0.16 },
+  // kickflip: crouch hard over the dog and reach the right hand down at it —
+  // the flick that "flips the board". Left arm high for counterbalance. duck
+  // drops the pelvis below PELVIS_FREE so the reach reads as a real crouch.
+  flip:  { hipL: -1.35, kneeL: 1.6, hipR: -1.05, kneeR: 1.65, aLr: 2.35, aLs: 0.25, aLe: -0.35, aRr: -0.12, aRs: -0.95, aRe: -0.15, torso: 0.78, plant: 0, gait: 0, duck: 0.13 },
+  grind: { hipL: -0.98, kneeL: 1.15, hipR: 0.82, kneeR: 0.92, aLr: 1.78, aLs: 0.0, aLe: -0.04, aRr: 1.78, aRs: 0.0, aRe: -0.04, torso: 0.3, plant: 1, gait: 0.2, duck: 0 },
+  land:  { hipL: -1.05, kneeL: 1.25, hipR: 0.88, kneeR: 1.00, aLr: 0.75, aLs: -0.95, aLe: -0.55, aRr: 0.75, aRs: -0.95, aRe: -0.55, torso: 0.45, plant: 1, gait: 0, duck: 0 },
+  bail:  { hipL: 0.25, kneeL: 0.55, hipR: -0.35, kneeR: 0.80, aLr: 2.40, aLs: 0.25, aLe: -0.85, aRr: 2.35, aRs: -0.20, aRe: -0.95, torso: -0.55, plant: 0.25, gait: 0, duck: 0 },
 }
 const KEYS = Object.keys(POSES.ride)
 
@@ -44,7 +74,7 @@ const _d = new THREE.Quaternion() // the only delta the frame loop allocates: no
 export default function Rider() {
   const root = useRef()
   const body = useRef()
-  const { scene } = useGLTF(URL)
+  const { scene } = useGLTF(URL, DRACO_PATH)
 
   const rig = useMemo(() => {
     scene.traverse((o) => {
@@ -92,7 +122,7 @@ export default function Rider() {
     const gait = cur.gait * P.runBlend * (P.grounded ? 1 : 0.25)
     const bob = Math.sin(P.run * 2) * 0.013 * gait
     body.current.position.y =
-      plant * (rig.ankle + 0.5 * (dropL + dropR)) + (1 - plant) * PELVIS_FREE + bob
+      plant * (rig.ankle + 0.5 * (dropL + dropR)) + (1 - plant) * (PELVIS_FREE - cur.duck) + bob
     body.current.rotation.z = sec.sway * 0.09
 
     setBone(bones.L_Thigh, eulerDelta(_d, cur.hipL))

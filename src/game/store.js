@@ -51,6 +51,10 @@ export const P = {
   dogRoll: 0, // barrel roll of the dog under the rider
   dogPitch: 0,
   riderLift: 0, // 0..1 separation from the dog
+  grab: 0, // 0..1 mid-air grab — the dog tweaks sideways like a grabbed board
+  grabStyle: 'nose', // which grab: nose | tail | indy | method — rolled per grab
+  surfLift: 0, // metres of rig lift on curved surfaces (long dog vs tight arc)
+  surfCurv: 0, // analytic curvature (1/R) of the ridden surface, from colliders
   riderPose: 'ride', // ride | tuck | grab | grind | land | air | bail
   crouch: 0, // 0..1 landing compression
   lean: 0, // -1..1 turn lean

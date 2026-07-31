@@ -16,6 +16,9 @@ import {
   masonryRough,
   stoneMap,
   stoneNormal,
+  woodMap,
+  woodNormal,
+  hpSurfMap,
   bowlMap,
   bowlNormal,
   bowlRough,
@@ -86,6 +89,18 @@ function mats() {
       normalMap: stoneN,
       normalScale: new THREE.Vector2(0.4, 0.4),
       ...M.stone,
+      envMapIntensity: 0.9,
+    }),
+    wood: std({
+      map: woodMap(),
+      normalMap: woodNormal(),
+      normalScale: new THREE.Vector2(0.45, 0.45),
+      ...M.wood,
+      envMapIntensity: 0.6,
+    }),
+    hpSurf: std({
+      map: hpSurfMap(),
+      ...M.hpSurf,
       envMapIntensity: 0.9,
     }),
     coping: std({
@@ -252,6 +267,37 @@ function Bowl() {
   )
 }
 
+// 'solid' = halfpipe structure: one flush plywood block, no masonry body
+// and no oversized cap lip, so platform + quarters + top decks read as a
+// single built wooden ramp rather than brick walls around a courtyard.
+function SolidSlab({ s }) {
+  const m = mats()
+  const base = s.base || 0
+  // texBox, not RoundedBox: box UVs are world-scaled per face, so the top
+  // face's v runs along z and the flat's planks line up with the quarters'
+  // riding direction (RoundedBox is an extruded shape — its top UVs come out
+  // rotated 90 degrees and the flat read as cross-planked).
+  const geo = useMemo(
+    () => texBox(s.w, s.top - base, s.d, 1 / PLAZA_TILE, 1 / PLAZA_TILE),
+    [s.w, s.top, base, s.d],
+  )
+  // The platform's top IS the halfpipe flat — it takes the blue sheet the
+  // quarters ride (BoxGeometry group 2 = +Y). The top decks stay all wood.
+  const mat =
+    s.id === 'hpDeck' ? [m.wood, m.wood, m.hpSurf, m.wood, m.wood, m.wood] : m.wood
+  return (
+    <group position={[s.x, 0, s.z]} rotation-y={s.rot || 0}>
+      <mesh
+        geometry={geo}
+        position-y={base + (s.top - base) / 2}
+        castShadow
+        receiveShadow
+        material={mat}
+      />
+    </group>
+  )
+}
+
 function Slab({ s }) {
   const m = mats()
   const base = s.base || 0
@@ -288,21 +334,32 @@ function Ramp({ s }) {
     () => buildRampGeometry(s.w, s.d, s.y0, s.y1, s.curve),
     [s.w, s.d, s.y0, s.y1, s.curve],
   )
-  // pale stone lip along the top edge, like the reference coping
+  // Coping tube hugging the top corner. The old stone RoundedBox was 0.4 deep,
+  // which juts ~0.3 out of a quarter's near-vertical face — the dog rode
+  // straight through it at every lip and swept it again on the launch arc. A
+  // 7cm tube embedded 2cm into the corner protrudes ~3.5cm, less than the
+  // curvature lift (P.surfLift) keeps the body clear of.
   const lipW = s.w + 0.16
   return (
     <group position={[s.x, 0, s.z]} rotation-y={s.rot || 0}>
-      <mesh geometry={geo} castShadow receiveShadow material={m.plaza} />
-      <RoundedBox
-        args={[lipW, 0.16, 0.4]}
-        radius={0.06}
-        smoothness={2}
-        bevelSegments={2}
-        position={[0, s.y1 - 0.03, s.d / 2 - 0.1]}
+      {/* 'solid' = the halfpipe: blue sheet on the ridden surface (geometry
+          group 0), birch plywood on the skirts and back (group 1), so it reads
+          as a built wooden ramp rather than plaza concrete up a curve */}
+      <mesh
+        geometry={geo}
         castShadow
         receiveShadow
-        material={m.stone}
+        material={s.style === 'solid' ? [m.hpSurf, m.wood] : m.plaza}
       />
+      <mesh
+        position={[0, s.y1 - 0.02, s.d / 2 - 0.02]}
+        rotation-z={Math.PI / 2}
+        castShadow
+        receiveShadow
+        material={m.coping}
+      >
+        <cylinderGeometry args={[0.07, 0.07, lipW, 12]} />
+      </mesh>
     </group>
   )
 }
@@ -440,9 +497,9 @@ export default function Skatepark() {
     <group ref={root}>
       <Plaza />
       <Bowl />
-      {boxes.map((s) => (
-        <Slab key={s.id} s={s} />
-      ))}
+      {boxes.map((s) =>
+        s.style === 'solid' ? <SolidSlab key={s.id} s={s} /> : <Slab key={s.id} s={s} />,
+      )}
       {ramps.map((s) => (
         <Ramp key={s.id} s={s} />
       ))}

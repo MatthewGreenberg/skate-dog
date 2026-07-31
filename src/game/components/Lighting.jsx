@@ -27,6 +27,7 @@ const TO_LIGHT = LIGHT_BASIS.clone().invert()
 // ~4.8 units in light space, so 4 was quietly clipping the deep end's shadow.
 const PAD = 6
 const QUANT = 2 // box sizes step in 2s so speed-zoom does not make the fit breathe
+let planeY = 0 // last grounded P.pos.y — held through the air so jumps don't refit the box
 
 // ---------------------------------------------------------------- rig levels
 // The four intensities LIGHT publishes are the one place this file argues with
@@ -300,6 +301,13 @@ export default function Lighting() {
     if (!key.current || !target.current) return
     if (key.current.target !== target.current) key.current.target = target.current
 
+    // Latch the fit plane to the last grounded height: a high ollie raises
+    // P.pos.y several units, and refitting to that moving plane resized the box
+    // every airborne frame — each QUANT crossing remaps the whole shadow map,
+    // which reads as the shadows redrawing mid-jump. The camera's own rise is
+    // damped and air-capped, so with the plane held QUANT absorbs the rest.
+    if (P.state !== 'air') planeY = P.pos.y
+
     // Where the four frustum corner rays cross the plane the player is on.
     // Casters share their shadow's light-space x/y, so anything whose shadow
     // lands in frame is already inside this box — height needs no padding here,
@@ -313,7 +321,7 @@ export default function Lighting() {
     for (const [nx, ny] of NDC) {
       _p.set(nx, ny, -1).unproject(camera)
       _dir.set(nx, ny, 1).unproject(camera).sub(_p)
-      const t = Math.abs(_dir.y) > 1e-6 ? (P.pos.y - _p.y) / _dir.y : 1
+      const t = Math.abs(_dir.y) > 1e-6 ? (planeY - _p.y) / _dir.y : 1
       _p.addScaledVector(_dir, Math.min(Math.max(t, 0), 1)).applyMatrix4(TO_LIGHT)
       minX = Math.min(minX, _p.x)
       maxX = Math.max(maxX, _p.x)

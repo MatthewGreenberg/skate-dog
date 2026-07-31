@@ -63,6 +63,23 @@ const _size = new THREE.Vector3()
 
 const damp = (cur, to, lambda, dt) => cur + (to - cur) * (1 - Math.exp(-lambda * dt))
 
+// Per-grab dog reaction, keyed by P.grabStyle (paired with Rider's grab_*
+// poses). Each channel multiplies P.grab (0..1): pitch on rotation.x (negative
+// = nose up), roll on rotation.z (the sideways tweak), x/y position offsets
+// toward the grabbing hand. nose = the original Nosegrab.webp numbers.
+const GRABS = {
+  nose: { pitch: -0.4, roll: 0.25, x: -0.08, y: 0.08 },
+  // nose drops, tail base swings up-and-forward to meet the left hand reaching
+  // back — hand lands 0.107 from the tail base, measured on the fitted rig.
+  tail: { pitch: 0.5, roll: -0.22, x: 0.06, y: 0.1 },
+  // the signature sideways poke: max roll, token pitch (an indy must not read
+  // as a pitch trick), lifted into the straight-down right hand — gap 0.064.
+  indy: { pitch: -0.12, roll: 0.35, x: -0.05, y: 0.1 },
+  // pulled up-and-behind the arched-back rider into the left hand reaching
+  // down-behind — y at cap puts the deck under the folded-up feet, gap 0.075.
+  method: { pitch: -0.12, roll: 0.3, x: 0.11, y: 0.12 },
+}
+
 // In model space forward is +X and up is +Y, so a limb swings fore/aft about Z,
 // an ear flaps about X and the tail wags about Y.
 const swingZ = (bone, a) => setBone(bone, eulerDelta(_d, 0, 0, a))
@@ -114,10 +131,14 @@ export default function Dog() {
     const bob = Math.sin(P.run * 2) * 0.016 * cycle
 
     const r = root.current
-    r.rotation.x = P.dogPitch
+    // grab: the dog is pulled toward the reaching hand — connection over
+    // separation, one unit in the air. Which way depends on the rolled style.
+    const gb = GRABS[P.grabStyle] || GRABS.nose
+    r.rotation.x = P.dogPitch + P.grab * gb.pitch
     r.rotation.y = Math.sin(P.run) * 0.05 * cycle
-    r.rotation.z = P.dogRoll + P.lean * 0.22 + Math.sin(P.run) * 0.035 * cycle
-    r.position.y = bob - P.crouch * 0.06
+    r.rotation.z = P.dogRoll + P.lean * 0.22 + Math.sin(P.run) * 0.035 * cycle + P.grab * gb.roll
+    r.position.x = P.grab * gb.x
+    r.position.y = bob - P.crouch * 0.06 + P.grab * gb.y
     r.scale.set(
       1 + P.crouch * 0.08,
       1 - P.crouch * 0.2 - P.stretch * 0.02,

@@ -139,6 +139,11 @@ export function buildRampGeometry(w, d, y0, y1, curve, base = 0) {
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
   g.setIndex(idx)
+  // group 0 = the ridden top surface, group 1 = skirts + back wall, so the
+  // halfpipe can lay a different sheet material on the surface than on the
+  // structure. A single (non-array) material renders both groups identically.
+  g.addGroup(0, N * 6, 0)
+  g.addGroup(N * 6, idx.length - N * 6, 1)
   g.computeVertexNormals()
   return g
 }

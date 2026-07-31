@@ -148,5 +148,30 @@ for (let i = 0; i < RAILS.length; i++) {
   }
 }
 
-console.log(fails ? `${fails} failure(s)` : `rails ok (${RAILS.length})`)
+// ---- lip edges: derived wall-cap / planter-rim grinds ----------------------
+// The two ways this goes wrong are opposites: a lip you cannot lock onto from
+// on top of it, and a lip that grabs you while you roll past on the ground
+// below. findGrind's dy window is the only thing separating them.
+const { PATHS, findGrind } = await import('./rails.js')
+const lips = PATHS.filter((p) => p.id.startsWith('wallcap') || p.id.startsWith('planter'))
+check(lips.length > 20, `expected lip edges, got ${lips.length}`)
+
+for (const lip of lips) {
+  const [a, b] = [lip.pts[0], lip.pts[lip.pts.length - 1]]
+  const mx = (a.x + b.x) / 2
+  const mz = (a.z + b.z) / 2
+  const t = b.clone().sub(a).normalize()
+
+  // riding the lip, travelling along it
+  const on = findGrind(mx, a.y, mz, t.x * 6, t.z * 6)
+  check(on && on.rail.id === lip.id, `${lip.id} not grindable from on top of it`)
+
+  // passing 0.9m below it: this lip must not reach down for you. (Another
+  // lip may legitimately be at that height — pad1's skirt cap stands 0.9
+  // above the planter rim tucked against it — so only the lip itself counts.)
+  const off = findGrind(mx, a.y - 0.9, mz, t.x * 6, t.z * 6)
+  check(!off || off.rail.id !== lip.id, `${lip.id} grabs from 0.9m below it`)
+}
+
+console.log(fails ? `${fails} failure(s)` : `rails ok (${RAILS.length} + ${lips.length} lips)`)
 process.exit(fails ? 1 : 0)

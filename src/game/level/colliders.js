@@ -52,12 +52,19 @@ for (const p of PLANTERS) {
 }
 
 // ------------------------------------------------------------ broad phase
+// Buckets are dilated by the largest query radius: bucket(x,z) returns one
+// cell, and a 0.5m circle standing just inside a cell boundary overlaps
+// colliders bucketed only in the next cell over. Undilated, 22 of 58 colliders
+// were reachable from cells that never tested them — the pad2 skirt wall's
+// face sits exactly ON a boundary (z=30, CELL 6) and let the whole body embed
+// 0.5m before the next cell's pass ejected it in one frame.
+const GRID_PAD = 0.6
 const grid = new Map()
 const key = (ix, iz) => ix * 8192 + iz
 for (let i = 0; i < cols.length; i++) {
   const c = cols[i]
-  for (let ix = Math.floor(c.minX / CELL); ix <= Math.floor(c.maxX / CELL); ix++) {
-    for (let iz = Math.floor(c.minZ / CELL); iz <= Math.floor(c.maxZ / CELL); iz++) {
+  for (let ix = Math.floor((c.minX - GRID_PAD) / CELL); ix <= Math.floor((c.maxX + GRID_PAD) / CELL); ix++) {
+    for (let iz = Math.floor((c.minZ - GRID_PAD) / CELL); iz <= Math.floor((c.maxZ + GRID_PAD) / CELL); iz++) {
       const k = key(ix, iz)
       let a = grid.get(k)
       if (!a) grid.set(k, (a = []))
@@ -99,10 +106,34 @@ function rampSlope(c, s) {
 }
 
 /**
+ * Top of the tallest ramp whose footprint contains (x,z), or -Infinity.
+ *
+ * A ramp's footprint is a HOLE in whatever deck it feeds — that deck must not
+ * act on you while you are on the transition into it. Both failure modes were
+ * the same bug wearing different hats: qp1's coping sits 0.5m inside deckA's
+ * footprint, so the deck's face stopped you halfway up (collision), and the
+ * moment STEP_UP could reach its 1.6 top the surface query teleported you onto
+ * it and flattened the climb (height). Anything TALLER than the ramp's top —
+ * walls, the dividers flanking the transitions — is unaffected.
+ * (An earlier note here said qp1 was "only 0.83m up where the deck starts" —
+ * that number was the arc-length origin bug being measured, not geometry. The
+ * corrected ramp reads exactly 1.600 at deckA's edge.)
+ */
+function rampTopAt(x, z, b) {
+  let top = -Infinity
+  for (const c of b) {
+    if (c.shape === 'flat') continue
+    const { lx, lz } = localZ(c, x, z)
+    if (Math.abs(lx) <= c.hw && Math.abs(lz) <= c.hd) top = Math.max(top, c.y0, c.y1)
+  }
+  return top
+}
+
+/**
  * Highest walkable surface at (x,z) reachable from feetY.
  * Writes into `out` (no allocation) and returns it.
  */
-const _out = { y: 0, nx: 0, ny: 1, nz: 0, type: 'concrete', slope: 0, inBowl: false, id: null }
+const _out = { y: 0, nx: 0, ny: 1, nz: 0, type: 'concrete', slope: 0, curv: 0, inBowl: false, id: null }
 export function sampleSurface(x, z, feetY, out = _out) {
   out.y = 0
   out.nx = 0
@@ -110,6 +141,7 @@ export function sampleSurface(x, z, feetY, out = _out) {
   out.nz = 0
   out.type = 'concrete'
   out.slope = 0
+  out.curv = 0
   out.inBowl = false
   out.id = null
 
@@ -126,32 +158,46 @@ export function sampleSurface(x, z, feetY, out = _out) {
   }
 
   const limit = feetY + STEP_UP
-  for (const c of bucket(x, z)) {
+  const b = bucket(x, z)
+  const rampTop = rampTopAt(x, z, b)
+  for (const c of b) {
     const { lx, lz } = localZ(c, x, z)
     if (Math.abs(lx) > c.hw || Math.abs(lz) > c.hd) continue
 
     if (c.shape === 'flat') {
+      if (c.top <= rampTop + 0.02) continue
       if (c.top <= limit && c.top > out.y) {
         out.y = c.top
         out.nx = 0
         out.ny = 1
         out.nz = 0
         out.slope = 0
+        out.curv = 0 // a quarter evaluated earlier must not leak its lift onto a flat
         out.type = c.type
         out.inBowl = false
         out.id = c.id
       }
     } else {
-      const s = lz + c.hd - RAMP_OVER / 2
+      // Arc length from the ramp's LOW edge. addRect grew the footprint only
+      // uphill (centre shifted +RAMP_OVER/2, d grew by RAMP_OVER), so the low
+      // edge sits exactly at lz = -hd. Subtracting RAMP_OVER/2 here again
+      // double-counted the shift and slid every ramp's collision 0.5m uphill
+      // of its mesh — qp1 read 0.825 where the drawn coping is 1.6, and every
+      // ramp-to-deck seam had a 0.1-0.78m trench STEP_UP had to jump.
+      const s = lz + c.hd
       const y = rampY(c, s)
       if (y <= limit && y > out.y) {
         const k = rampSlope(c, s)
         const inv = 1 / Math.hypot(1, k)
+        const h = c.y1 - c.y0
         out.y = y
         out.nx = -c.s * k * inv
         out.ny = inv
         out.nz = -c.c * k * inv
         out.slope = Math.atan(k)
+        // analytic arc curvature (1/R) so the rig's clearance lift needs no
+        // frame-late measurement; 0 on the flat overhang and on linear banks
+        out.curv = c.curve === 'quarter' && s < c.run ? (2 * h) / (c.run * c.run + h * h) : 0
         out.type = c.type
         out.inBowl = false
         out.id = c.id
@@ -179,17 +225,30 @@ export function resolveCollision(p, feetY, radius, push = _push) {
   push.z = 0
   const limit = feetY + STEP_UP
 
-  for (let pass = 0; pass < 2; pass++) {
+  // 4 passes: 2 converged everywhere except corner pockets where two solids
+  // push in sequence (planter + wall cap on deckA) — the extra passes let the
+  // point walk around the corner instead of oscillating in the wedge
+  for (let pass = 0; pass < 4; pass++) {
     let moved = false
-    for (const c of bucket(p.x, p.z)) {
-      const top = c.shape === 'flat' ? c.top : Math.max(c.y0, c.y1)
-      if (top <= limit) continue
+    const b = bucket(p.x, p.z)
+    const rampTop = rampTopAt(p.x, p.z, b)
+
+    for (const c of b) {
+      if (c.shape === 'flat' && c.top <= rampTop + 0.02) continue
       const dx = p.x - c.x
       const dz = p.z - c.z
       const lx = c.c * dx - c.s * dz
       const lz = c.s * dx + c.c * dz
       const qx = Math.min(Math.max(lx, -c.hw), c.hw)
       const qz = Math.min(Math.max(lz, -c.hd), c.hd)
+      // A ramp is only a wall where it is actually TALL. Testing it by
+      // max(y0,y1) made every ramp and stair an impassable box: approach the
+      // low end at plaza height and the whole footprint ejected you (bank1
+      // threw you 4.9m sideways), so nothing in the park was rideable. Measure
+      // the ramp at the nearest point of its footprint instead — the low end
+      // reads ~0 and lets you roll on, the cheeks and the top still block.
+      const top = c.shape === 'flat' ? c.top : rampY(c, qz + c.hd)
+      if (top <= limit) continue
       const ox = lx - qx
       const oz = lz - qz
       const d2 = ox * ox + oz * oz
@@ -214,6 +273,10 @@ export function resolveCollision(p, feetY, radius, push = _push) {
           nz = Math.sign(lz) || 1
           depth = ez + radius
         }
+        // full-depth ejection from a long collider is metres in one substep —
+        // flying into the halfpipe's back face flung you 1.7m north in a frame.
+        // Unwedge at most a radius per pass; the next substeps finish the job.
+        depth = Math.min(depth, radius)
       }
       const wx = (c.c * nx + c.s * nz) * depth
       const wz = (-c.s * nx + c.c * nz) * depth

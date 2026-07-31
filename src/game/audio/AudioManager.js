@@ -12,7 +12,6 @@ let breezeLP = null, breezeGain = null, rollBP = null, rollGain = null
 let grindBP = null, grindLevel = null, grindGain = null
 const loops = [], unsubs = []
 let breezePhase = 0, birdTimer = 4, lastHalf = 0
-let grindTime = 0, grindYipTimer = 0
 
 // per-surface paw tick { freq, Q, gain, decay } and rolling-noise { freq×, gain× }
 const PAW = {
@@ -106,33 +105,9 @@ function voice(dur) {
 }
 
 // ---------------------------------------------------------------- one-shots
-// Dog voice: sawtooth + breath noise through one throat formant. pitch 1 is a
-// mid-size yip; higher = smaller/happier dog.
-function yip(t0, pitch = 1, lvl = 0.26) {
-  const v = voice(0.25)
-  const o = osc('sawtooth', 500 * pitch), f = flt('bandpass', 950 * pitch, 1.5), g = gn(0)
-  o.frequency.setValueAtTime(520 * pitch, t0)
-  o.frequency.exponentialRampToValueAtTime(230 * pitch, t0 + 0.09)
-  env(g.gain, t0, lvl, 0.008, 0.1)
-  const s = noise(false, false), sg = gn(0.35)
-  s.connect(sg); sg.connect(f)
-  o.connect(f); f.connect(g); g.connect(v.g)
-  o.start(t0); o.stop(t0 + 0.16)
-  s.start(t0, Math.random() * 2); s.stop(t0 + 0.12)
-  v.add(o, f, g, s, sg)
-}
-
-// sad cartoon whimper: pitch rises then droops
-function whine(t0) {
-  const v = voice(0.75)
-  const o = osc('sine', 700), g = gn(0)
-  o.frequency.setValueAtTime(650, t0)
-  o.frequency.linearRampToValueAtTime(1100, t0 + 0.2)
-  o.frequency.linearRampToValueAtTime(430, t0 + 0.55)
-  env(g.gain, t0, 0.15, 0.05, 0.48)
-  o.connect(g); g.connect(v.g); o.start(t0); o.stop(t0 + 0.6)
-  v.add(o, g)
-}
+// No dog voice. The kit used to bark on takeoff, bark on a trick, whimper on a
+// bail and yip faster and faster through a grind; it is all gone by request.
+// The paw patter below stays — that is the gait, not the dog talking.
 function pawTick(sp) {
   const [hz, q, lvl, dec] = PAW[P.surfaceType] || PAW.concrete
   const t = ctx.currentTime, v = voice(0.2)
@@ -151,7 +126,6 @@ function sfxJump() {
   o.frequency.exponentialRampToValueAtTime(1250, t + 0.16) // cartoon slide-whistle up
   env(og.gain, t, 0.4, 0.012, 0.22)
   o.connect(og); og.connect(v.g); o.start(t); o.stop(t + 0.3)
-  yip(t + 0.03, 1 + Math.random() * 0.2) // excited bark on takeoff
   const s = noise(false, false), f = flt('highpass', 1100), ng = gn(0)
   env(ng.gain, t, 0.09, 0.006, 0.09)
   s.connect(f); f.connect(ng); ng.connect(v.g)
@@ -196,8 +170,6 @@ function sfxTrick(e) {
     env(g.gain, t0, 0.17 * k, 0.008, 0.42)
     o.connect(g); g.connect(v.g); o.start(t0); o.stop(t0 + 0.5); v.add(o, g)
   })
-  yip(t + 0.12, 1.3, 0.2) // celebratory bark, double for big scores
-  if (pts > 800) yip(t + 0.28, 1.45, 0.2)
 }
 
 function sfxBail() {
@@ -210,7 +182,6 @@ function sfxBail() {
   env(v.g.gain, t, 0.26, 0.03, 0.58)
   o.connect(v.g); o.start(t); o.stop(t + 0.68); lfo.start(t); lfo.stop(t + 0.68)
   v.add(o, lfo, lg)
-  whine(t + 0.2) // the dog is not pleased
 }
 
 function chirp() {
@@ -317,17 +288,6 @@ export function updateAudio(dt) {
   if (grinding) {
     grindBP.frequency.setTargetAtTime(Math.min(6500, 1700 + sp * 200), t, 0.12)
     grindLevel.gain.setTargetAtTime(0.5 + Math.min(0.6, sp / 14), t, 0.15)
-    // the dog gets progressively more thrilled the longer the grind holds:
-    // yips speed up and climb in pitch
-    grindTime += d
-    grindYipTimer -= d
-    if (grindYipTimer <= 0) {
-      grindYipTimer = Math.max(0.35, 0.9 - grindTime * 0.12) + Math.random() * 0.25
-      yip(t, 1.1 + Math.min(0.6, grindTime * 0.15), 0.17)
-    }
-  } else {
-    grindTime = 0
-    grindYipTimer = 0.4 // grace so a tap-on-tap-off grind doesn't bark
   }
 
   // paw patter: one tick per half-cycle of the gait phase
@@ -357,7 +317,6 @@ export function disposeAudio() {
   master = breezeLP = breezeGain = rollBP = rollGain = grindBP = grindLevel = grindGain = null
   whiteBuf = pinkBuf = null
   started = grinding = false
-  grindTime = 0; grindYipTimer = 0
   birdTimer = 4 // otherwise a remount chirps on frame one with a stale timer
   vi = 0
 }

@@ -71,66 +71,6 @@
   text-shadow: 0 2px 5px var(--ink);
 }
 
-.hud-lives {
-  right: var(--edge);
-  bottom: var(--edge);
-  padding: 0 calc(var(--u) * 1.2) 0 calc(var(--u) * 0.42);
-}
-.hud-chip {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(var(--u) * 2.3);
-  height: calc(var(--u) * 2.3);
-  border-radius: calc(var(--u) * 0.62);
-  background: #fff;
-  box-shadow: inset 0 calc(var(--u) * -0.1) 0 rgba(90, 58, 150, 0.12);
-}
-.hud-dog {
-  width: calc(var(--u) * 2.05);
-  height: calc(var(--u) * 2.05);
-}
-.hud-lives-value {
-  color: #fff;
-  font-size: calc(var(--u) * 1.6);
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: 0.03em;
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 2px 5px var(--ink);
-}
-
-/* ------------------------------------------------------------ hint */
-.hud-hint {
-  position: absolute;
-  bottom: var(--edge);
-  left: var(--edge);
-  display: flex;
-  align-items: center;
-  gap: calc(var(--u) * 0.68);
-}
-.hud-key {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(var(--u) * 1.86);
-  height: calc(var(--u) * 1.86);
-  border-radius: 50%;
-  background: #fff;
-  color: #2b1a44;
-  font-size: calc(var(--u) * 0.98);
-  font-weight: 800;
-  line-height: 1;
-  box-shadow: 0 calc(var(--u) * 0.22) calc(var(--u) * 0.6) rgba(40, 18, 70, 0.38);
-}
-.hud-hint > span:last-child {
-  color: #fff;
-  font-size: calc(var(--u) * 1.2);
-  font-weight: 700;
-  letter-spacing: 0.045em;
-  text-shadow: 0 2px 8px rgba(48, 22, 78, 0.7);
-}
 
 /* ------------------------------------------------------------ trick */
 .hud-trick {

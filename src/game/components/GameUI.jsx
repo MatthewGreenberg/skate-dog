@@ -21,21 +21,6 @@ function BoneIcon() {
   )
 }
 
-function DogIcon() {
-  // dachshund head, three-quarter: floppy ear behind, long muzzle, big nose
-  return (
-    <svg className="hud-dog" viewBox="0 0 40 40" aria-hidden="true">
-      {/* floppy ear behind, round head, long muzzle to the left, big nose */}
-      <ellipse cx="29.5" cy="24" rx="7.6" ry="12.4" fill="#9c5f2c" transform="rotate(10 29.5 24)" />
-      <circle cx="20.5" cy="17.5" r="13.4" fill="#e9b26c" />
-      <ellipse cx="11.5" cy="25" rx="10.2" ry="7.4" fill="#f7dcae" />
-      <ellipse cx="4.6" cy="24.2" rx="4.2" ry="3.5" fill="#33241d" />
-      <circle cx="20.6" cy="14.2" r="2.9" fill="#33241d" />
-      <circle cx="21.7" cy="13.2" r="0.95" fill="#fff" opacity="0.85" />
-    </svg>
-  )
-}
-
 function ScorePill() {
   const score = useGame((s) => s.score)
   const pillRef = useRef(null)
@@ -70,18 +55,6 @@ function ScorePill() {
       <span className="hud-score-value" ref={numRef}>
         0
       </span>
-    </div>
-  )
-}
-
-function LivesPill() {
-  const lives = useGame((s) => s.lives)
-  return (
-    <div className="hud-pill hud-lives">
-      <span className="hud-chip">
-        <DogIcon />
-      </span>
-      <span className="hud-lives-value">x{lives}</span>
     </div>
   )
 }
@@ -131,12 +104,11 @@ function TrickPopup() {
 }
 
 const LEGEND = [
-  ['WASD / Arrows', 'steer'],
   ['Space', 'jump'],
-  ['← → in air', 'spin'],
+  ['Arrows / WASD', 'move'],
+  ['↑ in air', 'grab'],
   ['↓ in air', 'kickflip'],
-  ['K', 'grab'],
-  ['Shift', 'brake'],
+  ['← → in air', 'spin'],
 ]
 
 function StartOverlay() {
@@ -175,11 +147,6 @@ export default function GameUI() {
     <div className="hud">
       <div className={live ? 'hud-widgets' : 'hud-widgets is-idle'}>
         <ScorePill />
-        <LivesPill />
-        <div className="hud-hint">
-          <span className="hud-key">Y</span>
-          <span>Dismount</span>
-        </div>
       </div>
       <TrickPopup />
       {!live && <StartOverlay />}

@@ -4,7 +4,7 @@
 
 import * as THREE from 'three'
 import { P, useGame, emit } from '../store.js'
-import { input, consumeJump, applyTouchStick } from '../input.js'
+import { input, consumeJump, applyTouchStick, TOUCH } from '../input.js'
 import { sampleSurface, resolveCollision } from '../level/colliders.js'
 import { findGrind, railAt, PATHS } from '../level/rails.js'
 import { SPAWN } from '../level/levelData.js'
@@ -14,8 +14,13 @@ const STEP = 1 / 120
 const MAX_STEPS = 10
 
 const G = 22
-const MAX_SPEED = 13
-const ACCEL = 13
+// Mobile rides ~30% slower: the same speed reads much faster on a small screen
+// with a thumb stick, and overspeed drag above the lower cap curbs the
+// gravity-built bowl speed too. CLEAN_CAP and the turn-rate blend are both
+// relative to MAX_SPEED, so they scale with it for free. Desktop untouched.
+const SPEED_K = TOUCH ? 0.7 : 1
+const MAX_SPEED = 13 * SPEED_K
+const ACCEL = 13 * SPEED_K
 const REVERSE_ACCEL = 5
 const BRAKE = 18
 const ROLL_DRAG = 0.32

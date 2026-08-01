@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber'
 import { Environment, Lightformer } from '@react-three/drei'
 import { C, LIGHT, mix } from '../palette.js'
 import { P, useGame } from '../store.js'
+import { TOUCH } from '../input.js'
 
 // The whole rig is the decomposition in palette.js made real: a golden key and a
 // violet sky that sum to white. Every colour, every direction and the haze come
@@ -386,7 +387,7 @@ export default function Lighting() {
         // plaza frame spans ~70 units, and at 2048 that is 34mm of world per
         // texel — coarser than a skateboard is thick, which is why bench legs
         // and the rider's shadow were dissolving before they reached the slab.
-        shadow-mapSize={quality === 'low' ? [1536, 1536] : [3072, 3072]}
+        shadow-mapSize={TOUCH ? [1024, 1024] : quality === 'low' ? [1536, 1536] : [3072, 3072]}
         // Under PCF this is the Vogel disk radius in TEXELS, not a blur kernel.
         // It is a noise budget as much as a softness one: three spends exactly
         // five Vogel taps and rotates the pattern per pixel by interleaved

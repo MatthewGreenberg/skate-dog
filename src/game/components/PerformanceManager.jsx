@@ -1,5 +1,6 @@
 import { AdaptiveDpr, AdaptiveEvents, PerformanceMonitor, Stats } from '@react-three/drei'
 import { useGame } from '../store.js'
+import { TOUCH } from '../input.js'
 import { PHOTO } from '../photo.js'
 
 const DEV = import.meta.env.DEV
@@ -18,7 +19,10 @@ export default function PerformanceManager() {
         bounds={() => [48, 60]}
         flipflops={2}
         onDecline={() => setQuality('low')}
-        onIncline={() => setQuality('high')}
+        // phones are pinned low: a brief 60fps stretch flipping quality high
+        // rebuilds the composer's render targets mid-play, and the drop that
+        // caused is exactly what flips it straight back
+        onIncline={() => setQuality(TOUCH ? 'low' : 'high')}
         onFallback={() => setQuality('low')}
       />
       <AdaptiveDpr pixelated={false} />

@@ -162,7 +162,10 @@ function PostFX() {
           — measured 3%. Occlusion that reads has to be sampled at the scale of
           the occluder, and then shaped by the exponent rather than by the
           radius. */}
-      {fx.aoOn && (
+      {fx.aoOn && !TOUCH && (
+        // no AO at all on phones — even half-res 10-sample n8ao is the most
+        // expensive single pass on a mobile GPU, and the baked AO in the
+        // textures still grounds the big junctions
         <N8AO
           // 1.6, bracketed from both sides against the AO buffer and the finished
           // frame. At 0.9 a wall base measured 3% occluded. At 2.4 the junctions
@@ -271,7 +274,9 @@ export default function Game() {
         // than by a permanent tax on sharpness.
         // ...but a phone GPU at dpr 2-3 can't hold the frame rate at all, and a
         // 6" screen hides the upscale softness the cap costs a desktop display
-        dpr={TOUCH ? [1, 1.5] : [1, 2]}
+        // (floor 0.75 on touch gives AdaptiveDpr real room to shed pixels
+        // under load; steady-state still renders at the 1.5 cap)
+        dpr={TOUCH ? [0.75, 1.5] : [1, 2]}
         gl={{
           // everything goes through the composer's own targets, so MSAA on the
           // default framebuffer is memory bandwidth spent on nothing

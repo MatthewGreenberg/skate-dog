@@ -90,13 +90,16 @@ src/game/
                       x spin, up grab, down kickflip — same as the arrows.
                       Stick response saturates at 55% deflection (raw 1:1 put
                       every input at half strength on a phone). input.js's
-                      TOUCH flag also drops the default quality to 'low',
-                      caps dpr at 1.5 (Game.jsx), pulls the chase camera
-                      back (CameraController zoom 0.9 vs 1.2) and scales
-                      MAX_SPEED/ACCEL by 0.7 (PlayerController SPEED_K — the
-                      same speed reads much faster on a phone screen) — the
-                      shoot harness is desktop headless, so captures and the
-                      node checks see none of it.
+                      TOUCH flag also drops the default quality to 'low'
+                      (PINNED — PerformanceManager's incline never lifts it
+                      on touch, a mid-play flip rebuilds the composer),
+                      disables N8AO entirely, shrinks the shadow map to 1024,
+                      runs dpr [0.75, 1.5] (Game.jsx/Lighting.jsx), pulls the
+                      chase camera back (CameraController zoom 0.9 vs 1.2)
+                      and scales MAX_SPEED/ACCEL by 0.7 (PlayerController
+                      SPEED_K — the same speed reads much faster on a phone
+                      screen) — the shoot harness is desktop headless, so
+                      captures and the node checks see none of it.
                       Effects.jsx = cartoon particle kit: rainbow grind sparks +
                       star-sparkle glitter (per-instance colour), star pops on
                       tricks/bails, shockwave rings on jump/grind-start (none on

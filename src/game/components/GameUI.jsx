@@ -135,20 +135,17 @@ function Joystick() {
       dx /= len
       dy /= len
     }
-    // Tight response: dead zone 0.12, full lock by 55% deflection. Raw 1:1
-    // needed the thumb at the rim for a hard carve, which on a phone means
-    // constantly overshooting the base — every input felt at half strength.
-    const shape = (v, sat) => Math.sign(v) * Math.min(1, Math.max(0, (Math.abs(v) - 0.12) / (sat - 0.12)))
-    touch.steer = shape(dx, 0.55)
-    touch.throttle = Math.max(0, shape(-dy, 0.5))
-    touch.reverse = dy > 0.35
+    // raw vector only — input.js resolves it against the live heading
+    touch.x = dx
+    touch.y = dy
+    touch.active = true
     nubRef.current.style.transform = `translate(${dx * r.width * 0.3}px, ${dy * r.height * 0.3}px)`
   }
   const end = (e) => {
     drag.current = false
-    touch.steer = 0
-    touch.throttle = 0
-    touch.reverse = false
+    touch.x = 0
+    touch.y = 0
+    touch.active = false
     if (nubRef.current) nubRef.current.style.transform = ''
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
   }

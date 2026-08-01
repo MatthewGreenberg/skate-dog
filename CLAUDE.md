@@ -78,10 +78,16 @@ src/game/
   components/         Game (canvas + post), Lighting, Skatepark, Props, Player, Effects, UI
                       GameUI also owns the mobile controls: on coarse-pointer
                       devices a left joystick + right JUMP button write into
-                      input.js's `touch` state, merged with the keys in
-                      sampleInput. The stick deliberately maps to the SAME
-                      steer/throttle/reverse axes — in the air that already
-                      means spin/grab/kickflip, so one stick does every trick.
+                      input.js's `touch` state. The stick is WORLD-directional
+                      on the ground — it points where you want to go on screen
+                      (the chase camera never rotates, so screen axes are one
+                      fixed world basis, CAM_YAW mirroring CameraController's
+                      YAW) and applyTouchStick derives steer from the heading
+                      error, called by PlayerController every SUBSTEP with the
+                      live heading because a stick held still while the dog
+                      turns must keep steering (input.check.js asserts the
+                      convergence). In the air the raw axes are the trick pad:
+                      x spin, up grab, down kickflip — same as the arrows.
                       Stick response saturates at 55% deflection (raw 1:1 put
                       every input at half strength on a phone). input.js's
                       TOUCH flag also drops the default quality to 'low',
@@ -279,6 +285,7 @@ node src/game/level/rails.check.js         # rail/post clearance vs walls, props
 node src/game/level/bones.check.js         # collectible bone float band + spacing
 node src/game/level/ramps.check.js         # every ramp + stair enterable, climbable, qp1 pops vert, early pop transfers to deck
 node src/game/level/collision.check.js     # ~40s: broad-phase coverage, wall penetration, ramp seams, drops, dt consistency, perimeter
+node src/game/input.check.js              # world-directional touch stick converges on the stick angle
 node src/game/player/steering.check.js
 node src/game/player/scoring.check.js      # live grind payout + combo multiplier chain
 node src/game/player/boneRig.check.js      # rider joint angles, in world space

@@ -4,7 +4,7 @@
 
 import * as THREE from 'three'
 import { P, useGame, emit } from '../store.js'
-import { input, consumeJump } from '../input.js'
+import { input, consumeJump, applyTouchStick } from '../input.js'
 import { sampleSurface, resolveCollision } from '../level/colliders.js'
 import { findGrind, railAt, PATHS } from '../level/rails.js'
 import { SPAWN } from '../level/levelData.js'
@@ -151,6 +151,9 @@ export function updatePlayer(dt) {
 
 function step(dt) {
   if (grindLock > 0) grindLock -= dt
+  // per-substep, with the live heading: the touch stick is world-directional
+  // on the ground, so its steer must track the heading as it turns
+  applyTouchStick(P.heading, P.state === 'air')
   P.throttle = input.throttle
   P.steer = input.steer
   P.braking = input.brake

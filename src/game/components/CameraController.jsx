@@ -11,6 +11,8 @@ import { applyPhotoCamera } from '../photo.js'
 // Framing comes from where the follow point drifts, not from rotation.
 
 const YAW = -0.42 // ~24 deg off the park grid, matching the reference framing
+// input.js mirrors this as CAM_YAW for the world-directional touch stick —
+// change one, change both (input.js can't import a .jsx under plain node)
 const HEIGHT = 20.9
 const BACK = 24.9 // -> ~40 deg downward pitch
 

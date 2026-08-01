@@ -82,6 +82,12 @@ src/game/
                       sampleInput. The stick deliberately maps to the SAME
                       steer/throttle/reverse axes — in the air that already
                       means spin/grab/kickflip, so one stick does every trick.
+                      Stick response saturates at 55% deflection (raw 1:1 put
+                      every input at half strength on a phone). input.js's
+                      TOUCH flag also drops the default quality to 'low',
+                      caps dpr at 1.5 (Game.jsx) and pulls the chase camera
+                      back (CameraController zoom 0.9 vs 1.2) — the shoot
+                      harness is desktop headless, so captures see none of it.
                       Effects.jsx = cartoon particle kit: rainbow grind sparks +
                       star-sparkle glitter (per-instance colour), star pops on
                       tricks/bails, shockwave rings on jump/grind-start (none on

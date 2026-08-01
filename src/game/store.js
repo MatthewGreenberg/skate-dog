@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import * as THREE from 'three'
 import { SPAWN } from './level/levelData.js'
+import { TOUCH } from './input.js'
 
 /**
  * UI-facing state only. Anything that changes every frame lives on `P` below
@@ -15,7 +16,9 @@ export const useGame = create((set, get) => ({
   trickPoints: 0,
   started: false,
   paused: false,
-  quality: 'high',
+  // phones start at 'low' (AO 10 samples, no MSAA, halved particle emission);
+  // the shoot harness runs desktop headless so captures stay 'high'
+  quality: TOUCH ? 'low' : 'high',
 
   start: () => set({ started: true }),
   setPaused: (paused) => set({ paused }),

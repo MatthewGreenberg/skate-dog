@@ -8,7 +8,7 @@ import { useControls, folder, Leva } from 'leva'
 
 import { P, useGame } from '../store.js'
 import { LIGHT } from '../palette.js'
-import { initInput, sampleInput } from '../input.js'
+import { initInput, sampleInput, TOUCH } from '../input.js'
 import { updatePlayer } from '../player/PlayerController.js'
 import { startAudio, updateAudio } from '../audio/AudioManager.js'
 import { PHOTO, tickPhotoReady } from '../photo.js'
@@ -269,7 +269,9 @@ export default function Game() {
         // display's own grid. AdaptiveDpr (PerformanceManager) still drops this
         // under load, so the 60 fps floor is protected by measurement rather
         // than by a permanent tax on sharpness.
-        dpr={[1, 2]}
+        // ...but a phone GPU at dpr 2-3 can't hold the frame rate at all, and a
+        // 6" screen hides the upscale softness the cap costs a desktop display
+        dpr={TOUCH ? [1, 1.5] : [1, 2]}
         gl={{
           // everything goes through the composer's own targets, so MSAA on the
           // default framebuffer is memory bandwidth spent on nothing

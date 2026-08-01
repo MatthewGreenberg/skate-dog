@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
 import { useControls } from 'leva'
 import { P } from '../store.js'
+import { TOUCH } from '../input.js'
 import { applyPhotoCamera } from '../photo.js'
 
 // Elevated three-quarter chase rig. The camera keeps a fixed world orientation
@@ -45,7 +46,9 @@ export default function CameraController() {
   const ready = useRef(false)
   // zoom > 1 pulls closer; fov is the Canvas default (26).
   const cam = useControls('camera', {
-    zoom: { value: 1.2, min: 0.4, max: 4, step: 0.05 },
+    // phones sit farther out: the thumb controls cover the bottom corners and
+    // a tight frame leaves no room to read the park around the player
+    zoom: { value: TOUCH ? 0.9 : 1.2, min: 0.4, max: 4, step: 0.05 },
     fov: { value: 20.5, min: 10, max: 70, step: 0.5 },
   })
 

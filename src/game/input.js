@@ -13,6 +13,11 @@ export const input = {
   reverse: false,
 }
 
+// Coarse pointer = phone/tablet. Shared: GameUI shows the touch controls,
+// store drops the default quality, Game caps dpr, CameraController pulls back.
+export const TOUCH =
+  typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+
 // Mobile layer, written by GameUI's joystick/jump button and merged with the
 // keys in sampleInput. The joystick reuses the same axes on purpose: in the
 // air steer IS spin, up IS grab and down IS kickflip, so one stick does every

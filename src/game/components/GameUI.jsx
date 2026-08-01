@@ -1,12 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { useGame } from '../store.js'
-import { touch, touchJumpDown, touchJumpUp } from '../input.js'
+import { touch, touchJumpDown, touchJumpUp, TOUCH } from '../input.js'
 import { unlockAudio } from '../audio/AudioManager.js'
 import { PHOTO } from '../photo.js'
 import './ui.css'
-
-// coarse pointer = phone/tablet: show the joystick + jump button, swap the legend
-const TOUCH = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
 
 const NUM = new Intl.NumberFormat('en-US')
 
@@ -138,10 +135,13 @@ function Joystick() {
       dx /= len
       dy /= len
     }
-    // dead zones so a thumb resting up doesn't wobble the line or feather the gas
-    touch.steer = Math.abs(dx) > 0.16 ? dx : 0
-    touch.throttle = -dy > 0.15 ? Math.min(1, -dy * 1.2) : 0
-    touch.reverse = dy > 0.4
+    // Tight response: dead zone 0.12, full lock by 55% deflection. Raw 1:1
+    // needed the thumb at the rim for a hard carve, which on a phone means
+    // constantly overshooting the base — every input felt at half strength.
+    const shape = (v, sat) => Math.sign(v) * Math.min(1, Math.max(0, (Math.abs(v) - 0.12) / (sat - 0.12)))
+    touch.steer = shape(dx, 0.55)
+    touch.throttle = Math.max(0, shape(-dy, 0.5))
+    touch.reverse = dy > 0.35
     nubRef.current.style.transform = `translate(${dx * r.width * 0.3}px, ${dy * r.height * 0.3}px)`
   }
   const end = (e) => {

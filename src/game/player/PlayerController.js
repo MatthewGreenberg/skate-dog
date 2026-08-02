@@ -7,7 +7,7 @@ import { P, useGame, emit } from '../store.js'
 import { input, consumeJump, applyTouchStick, TOUCH } from '../input.js'
 import { sampleSurface, resolveCollision } from '../level/colliders.js'
 import { findGrind, railAt, PATHS } from '../level/rails.js'
-import { SPAWN } from '../level/levelData.js'
+import { SPAWN, BOWL, bowlRadius } from '../level/levelData.js'
 
 // ------------------------------------------------------------------ tuning
 const STEP = 1 / 120
@@ -101,6 +101,7 @@ const trick = {
   grindTime: 0,
   grindBank: 0,
   bigAir: false, // 'bigair' already emitted this air
+  overPool: false, // crossed the bowl's interior during this air
 
   grindShown: 0, // multiplied points already added to the score this grind
   grindFlush: 0,
@@ -435,6 +436,7 @@ function takeoff(fromJump) {
   trick.fwdLatch = input.throttle > 0
   trick.grabbing = false // each air rolls a fresh grab style
   trick.bigAir = false
+  trick.overPool = false
   if (!fromJump) {
     trick.spinTotal = 0
     trick.dogSpins = 0
@@ -464,9 +466,19 @@ function doJump() {
 }
 
 // ------------------------------------------------------------------ air
+// How far inside the bowl's rim (x,z) is: <1 is over the hole. The gap bonus
+// wants the deep middle (k 0.7) but must LAND clear of the rim (k 1), or an
+// ordinary air out of the deep end and back in would pay it.
+function poolK(x, z) {
+  const dx = x - BOWL.cx
+  const dz = z - BOWL.cz
+  return Math.hypot(dx, dz) / bowlRadius(Math.atan2(dz, dx))
+}
+
 function stepAir(dt) {
   P.airTime += dt
   trick.air += dt
+  if (!trick.overPool && poolK(P.pos.x, P.pos.z) < 0.7) trick.overPool = true
   if (!trick.bigAir && trick.air > BIG_AIR) {
     trick.bigAir = true
     emit('bigair', { pos: P.pos })
@@ -769,6 +781,12 @@ function scoreAir() {
     pts += 100 + Math.round(trick.air * 60)
     name = name ? `${name} + Big Air` : 'Big Air'
   }
+  // Pool gap: flew over the middle of the bowl and landed clear of the rim.
+  // Pays like a Big Air because that's what it costs to clear a 12m hole.
+  if (trick.overPool && poolK(P.pos.x, P.pos.z) > 1) {
+    pts += 400
+    name = name ? `${name} + Pool Gap` : 'Pool Gap'
+  }
   if (!name && trick.air > 0.55) {
     name = 'Ollie'
     pts = 30 + Math.round(trick.air * 40)
@@ -779,6 +797,7 @@ function scoreAir() {
   trick.grabTime = 0
   trick.air = 0
   trick.bigAir = false
+  trick.overPool = false
   if (pts > 0) award(name, pts)
 }
 

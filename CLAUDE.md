@@ -167,7 +167,13 @@ src/game/
                        trick — so links must connect land-and-pop fast, but a
                        long air or rail can't time the chain out.
                        scoring.check.js measures both rates on r1 and that
-                       plain rolling drops the chain. Air tricks are on the
+                       plain rolling drops the chain. Pool Gap (+400) pays for
+                       flying over the bowl: the air must reach k<0.7 of the
+                       polar rim radius and LAND at k>1, so an ordinary air out
+                       of the deep end and back in doesn't count. G is 22, so a
+                       flat ollie clears ~9m and the full 12m diameter is out of
+                       reach — the line that pays is a corner cut across the
+                       rim. Air tricks are on the
                        direction keys — left/right spin, back kickflips (the dog
                        IS the board, so its barrel roll is the flip). There is no
                        air *steering*: a slow AIR_TURN on the same stick just

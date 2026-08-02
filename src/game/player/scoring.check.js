@@ -72,4 +72,27 @@ for (let i = 0; i < 300 && P.state !== 'ground'; i++) updatePlayer(DT)
 for (let i = 0; i < 72; i++) updatePlayer(DT) // 1.2s of plain rolling
 assert.equal(useGame.getState().combo, 0, 'rolling between tricks must end the chain')
 
+// 5. pool gap: fly across the bowl and land clear of the rim, vs the same air
+// dropped INTO the bowl — only the first pays. Bowl is r~5.85 at (-15, -4).
+function flyAcross(vx, vy) {
+  resetPlayer()
+  useGame.setState({ score: 0, combo: 0 })
+  P.pos.set(-9, 0.3, -1)
+  P.vel.set(vx, vy, 0)
+  P.heading = -Math.PI / 2
+  P.state = 'air'
+  P.grounded = false
+  let banner = ''
+  const un = useGame.subscribe((s) => {
+    if (s.trickText) banner = s.trickText
+  })
+  for (let i = 0; i < 400 && P.state === 'air'; i++) updatePlayer(DT)
+  un()
+  assert.notEqual(P.state, 'air', 'never came down')
+  return banner
+}
+
+assert.match(flyAcross(-14, 8.5), /Pool Gap/, 'clearing the bowl must pay a gap bonus')
+assert.doesNotMatch(flyAcross(-6, 3), /Pool Gap/, 'dropping INTO the bowl is not a gap')
+
 console.log('scoring ok')

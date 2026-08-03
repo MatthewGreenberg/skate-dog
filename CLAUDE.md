@@ -600,3 +600,11 @@ plan and demands 96%+ closed.
 - Comments explain **why**, with the measurement that forced the value. This
   codebase is dense with them on purpose — they are the record of what was
   already tried and why it failed.
+
+## Licence
+
+Source is PolyForm Noncommercial 1.0.0 (`LICENSE`), commercial use by separate
+paid licence. So: no copyleft dependencies, and `public/{boy,dog_compressed}.glb`,
+`public/songs/*` and `ref/*` are carved OUT of the grant — they ship so the
+project runs, they are not licensed for reuse. README.md is the public-facing
+version of this file.

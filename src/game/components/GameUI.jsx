@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useProgress } from '@react-three/drei'
 import { useGame } from '../store.js'
 import { touch, touchJumpDown, touchJumpUp, TOUCH } from '../input.js'
 import { unlockAudio } from '../audio/AudioManager.js'
@@ -196,14 +197,70 @@ const LEGEND = TOUCH
       ['← → in air', 'spin'],
     ]
 
-function StartOverlay() {
-  const onPlay = () => {
-    unlockAudio()
-    useGame.getState().start()
-  }
+// ---------------------------------------------------------------- loading
+// The two glb rigs are ~9MB compressed and every texture in the park is painted
+// into a canvas at load, so there IS a wait to fill. Progress comes off three's
+// DefaultLoadingManager via drei; the quips just make it a place to look.
+const QUIPS = [
+  'Waxing the coping…',
+  'Teaching the dachshund to ollie…',
+  'Painting 40,000 leaves…',
+  'Bolting the handrails on…',
+  'Hiding five bones…',
+  'Chalking the bowl…',
+]
+
+function LoadingScreen({ progress }) {
+  const [quip, setQuip] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setQuip((q) => (q + 1) % QUIPS.length), 1600)
+    return () => clearInterval(id)
+  }, [])
+  const pct = Math.round(progress)
   return (
-    <div className="hud-start">
-      <h1 className="hud-title">SKATE DOG</h1>
+    <div className="hud-load">
+      <div className="hud-load-dog" aria-hidden="true">
+        <span className="hud-load-pup">🐕</span>
+        <BoneIcon />
+      </div>
+      <div className="hud-load-bar">
+        <div className="hud-load-fill" style={{ width: `${pct}%` }} />
+        <div className="hud-load-marker" style={{ left: `${pct}%` }}>
+          <BoneIcon />
+        </div>
+      </div>
+      <div className="hud-load-row">
+        <span className="hud-load-quip">{QUIPS[quip]}</span>
+        <span className="hud-load-pct">{pct}%</span>
+      </div>
+    </div>
+  )
+}
+
+function StartOverlay() {
+  // The card exits on click while `started` is already flipping, so the DOM
+  // fade and the 3D reveal are the same 0.26s. Unmount comes free: GameUI drops
+  // the overlay the moment start() lands.
+  const [out, setOut] = useState(false)
+  const onPlay = () => {
+    if (out) return
+    setOut(true)
+    unlockAudio()
+    setTimeout(() => useGame.getState().start(), 260)
+  }
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        onPlay()
+      }
+    }
+    addEventListener('keydown', key)
+    return () => removeEventListener('keydown', key)
+  })
+  return (
+    <div className={out ? 'hud-start is-out' : 'hud-start'}>
+      {/* the SKATE DOG title is troika text in the scene — see Intro.jsx */}
       <p className="hud-sub">Ride the pup, bomb the plaza, grind every rail.</p>
       <div className="hud-legend">
         {LEGEND.map(([key, what]) => (
@@ -216,12 +273,30 @@ function StartOverlay() {
       <button className="hud-play" onClick={onPlay}>
         PLAY
       </button>
+      <span className="hud-hint">or press Enter</span>
     </div>
   )
 }
 
 export default function GameUI() {
   const started = useGame((s) => s.started)
+  const { progress } = useProgress()
+  // Latched, not live: the manager reports active=false between items, and a
+  // loader that blinks off mid-load is worse than no loader. Once 100 lands it
+  // never comes back — nothing in the park loads after the start card.
+  const [loaded, setLoaded] = useState(false)
+  // ponytail: hard 8s escape hatch. A manager that never reports 100 (nothing
+  // left to load by the time this mounts, a failed fetch) would otherwise leave
+  // the page on the loading screen with no way into the game.
+  useEffect(() => {
+    const t = setTimeout(() => setLoaded(true), 8000)
+    return () => clearTimeout(t)
+  }, [])
+  useEffect(() => {
+    if (progress < 100) return
+    const t = setTimeout(() => setLoaded(true), 400) // let the bar finish filling
+    return () => clearTimeout(t)
+  }, [progress])
   // photo mode shows the in-play HUD with a representative score, never the
   // start card — the capture has to match a mid-session frame
   useEffect(() => {
@@ -241,7 +316,7 @@ export default function GameUI() {
           <JumpButton />
         </>
       )}
-      {!live && <StartOverlay />}
+      {!live && (loaded ? <StartOverlay /> : <LoadingScreen progress={progress} />)}
     </div>
   )
 }

@@ -71,6 +71,10 @@ export const P = {
   grindS: 0,
   grindDir: 1,
   landImpact: 0,
+  // 1 = title framing, 0 = chase rig. Ticked down over the reveal by GameLoop;
+  // CameraController blends the two poses with it and Intro.jsx flies the
+  // troika title out on the same clock, so there is one timeline, not three.
+  intro: 1,
   throttle: 0,
   steer: 0,
   braking: false,

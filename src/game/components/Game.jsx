@@ -21,6 +21,7 @@ import Bones from './Bones.jsx'
 import CameraController from './CameraController.jsx'
 import PerformanceManager from './PerformanceManager.jsx'
 import GameUI from './GameUI.jsx'
+import Intro from './Intro.jsx'
 import useToonFX from './ToonFX.jsx'
 
 // One authoritative update order per frame: input -> movement/collision/surface
@@ -47,6 +48,7 @@ function GameLoop() {
     if (import.meta.env.DEV && !window.__three) window.__three = state
     // photo mode: the rig is frozen on its pose, so nothing simulates
     if (PHOTO) {
+      P.intro = 0 // captures are mid-session frames — never the title framing
       P.pos.set(PHOTO.player.x, PHOTO.player.y, PHOTO.player.z)
       P.heading = PHOTO.player.heading
       P.quat.setFromAxisAngle(UP, PHOTO.player.heading)
@@ -55,13 +57,20 @@ function GameLoop() {
     }
     const dt = Math.min(delta, 0.1)
     sampleInput(dt)
-    if (useGame.getState().started) updatePlayer(dt)
+    if (useGame.getState().started) {
+      if (P.intro > 0) P.intro = Math.max(0, P.intro - dt / REVEAL)
+      updatePlayer(dt)
+    }
     updateAudio(dt)
   })
   return null
 }
 
 const UP = new THREE.Vector3(0, 1, 0)
+// Seconds of camera swoop from the title framing into the chase rig. The sim
+// runs THROUGH it — you are already riding when the camera lands, which is what
+// makes it read as a reveal instead of a cutscene.
+const REVEAL = 1.5
 const AO_DEBUG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('ao')
 const DEBUG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('debug')
 
@@ -301,6 +310,7 @@ export default function Game() {
         <Skatepark />
         <Player />
         <Bones />
+        <Intro />
         <Effects />
         <PostFX />
         <PerformanceManager />

@@ -18,6 +18,18 @@ const BACK = 24.9 // -> ~40 deg downward pitch
 
 const OFFSET = new THREE.Vector3(Math.sin(YAW) * BACK, HEIGHT, Math.cos(YAW) * BACK)
 
+// Title framing: a slow orbit around the parked dog, low and close enough that
+// the troika title (Intro.jsx, ~3.9m up) and the dog share the frame. The lens
+// is a 20.5 deg telephoto — half a frame is only ~3.2m tall at this radius, so
+// the radius and the aim height are solved together, not picked.
+const INTRO_R = 18
+const INTRO_H = 5.2
+const INTRO_AIM = 2.3
+const INTRO_SPIN = 0.05 // rad/s of drift, just enough to not read as a still
+const camPos = new THREE.Vector3()
+const camAim = new THREE.Vector3()
+const introV = new THREE.Vector3()
+
 const LOOK_AHEAD = 0.3
 const LOOK_AHEAD_MAX = 3.6
 const SMOOTH_XZ = 0.24
@@ -92,8 +104,24 @@ export default function CameraController() {
     }
 
     const zoom = (1 + Math.min(1, sp / 13) * PULLBACK) / cam.zoom
-    camera.position.set(f.x + OFFSET.x * zoom, f.y + OFFSET.y * zoom, f.z + OFFSET.z * zoom)
-    camera.lookAt(f.x, f.y + 0.7, f.z)
+    camPos.set(f.x + OFFSET.x * zoom, f.y + OFFSET.y * zoom, f.z + OFFSET.z * zoom)
+    camAim.set(f.x, f.y + 0.7, f.z)
+
+    // Reveal: lerp the two POSES, not the angles — the chase rig never rotates,
+    // so both share an up vector and a straight-line dolly is all it needs.
+    // Smoothstepped, so the swoop has no kick at either end.
+    if (P.intro > 0) {
+      const a = YAW + 0.6 + state.clock.elapsedTime * INTRO_SPIN
+      const k = P.intro * P.intro * (3 - 2 * P.intro)
+      camPos.lerp(
+        introV.set(P.pos.x + Math.sin(a) * INTRO_R, P.pos.y + INTRO_H, P.pos.z + Math.cos(a) * INTRO_R),
+        k,
+      )
+      camAim.lerp(introV.set(P.pos.x, P.pos.y + INTRO_AIM, P.pos.z), k)
+    }
+
+    camera.position.copy(camPos)
+    camera.lookAt(camAim)
     if (camera.fov !== cam.fov) {
       camera.fov = cam.fov
       camera.updateProjectionMatrix()

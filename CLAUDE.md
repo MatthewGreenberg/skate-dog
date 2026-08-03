@@ -76,6 +76,23 @@ src/game/
     textures.js       every procedural map: albedo, normal, roughness, baked AO
     foliage.js        plant generation, pure data -> instance rows
   components/         Game (canvas + post), Lighting, Skatepark, Props, Player, Effects, UI
+                      Intro.jsx = the SKATE DOG title as troika text (drei
+                      <Text>) floating in the park, billboarded to the camera.
+                      Its font is served from public/fonts — troika's default
+                      fontURL is a gstatic CDN and nothing here fetches over the
+                      network. One reveal clock drives everything: P.intro goes
+                      1 -> 0 over 1.5s from GameLoop on start, CameraController
+                      smoothsteps between the title orbit (radius 18, height
+                      +5.2, aim +2.3 — solved so the 2.1m title AND the dog fit
+                      the 20.5deg lens, which sees only 3.3m of half-frame
+                      there) and the chase rig, and the title scales to zero as
+                      it climbs out. The sim runs THROUGH the swoop, so you are
+                      already riding when the camera lands. PHOTO mode pins
+                      P.intro to 0 and Intro renders nothing, so captures are
+                      untouched. GameUI shows a loading screen until drei's
+                      useProgress hits 100 (bone-chase bar + quips), latched so
+                      it can't blink off mid-load, with an 8s escape hatch so a
+                      manager that never reports 100 can't strand the page.
                       GameUI also owns the mobile controls: on coarse-pointer
                       devices a left joystick + right JUMP button write into
                       input.js's `touch` state. The stick is WORLD-directional
@@ -228,6 +245,8 @@ tools/                capture harness (see below)
 public/boy.glb        the rider. 4.1MB draco (was 34MB), 490k verts, 41 joints, no clips
 public/dog_compressed.glb  the dog. 4.6MB draco+ktx2, 534k verts, 31 joints, no clips
 public/{draco,basis}/ decoders for the above, served locally on purpose
+public/fonts/         Luckiest Guy (OFL), the intro title face — local for the
+                      same reason as the decoders
 ref/                  the reference stills the art is measured against
 ```
 

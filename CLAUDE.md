@@ -542,6 +542,25 @@ plan and demands 96%+ closed.
   is exactly what shipped: crown and core both landed near target while the
   MODE of the canopy sat 20 lightness points above the reference. Bin every
   green pixel (`hue 40-140, sat > 0.14`) by lightness and compare the curves.
+  Crop to the crowns first — a grove capture is mostly LAWN, and lawn passes
+  the same green filter, so an uncropped histogram measures the field and
+  reports that nothing is wrong. Cropped, the canopy read mode L42 / hue 67 /
+  sat 24 against the reference's L22 / 77 / 38 long after that diagnosis was
+  written: the note was right and the albedos were never actually moved. They
+  are now (`leaf*` in palette.js, one third of a stop down, greener, and
+  saturated PAST the reference because averaging ~100 differently-lit clumps
+  per crown plus a violet ambient eats ~10 points before the frame is drawn).
+- **A canopy ramped by height alone reads as noise.** From a 40-degree camera
+  every leaf mass presents its equator, so a height ramp resolves into
+  concentric bands and the eye reads the leftover per-clump jitter instead.
+  foliage.js ramps along the KEY'S BEARING too (`SUN_FACE`, from LIGHT.sunDir),
+  which is what gives a mass a light side and a dark side; it costs nothing,
+  the colour is per-instance and baked once. Keep it under ~0.25 or the sunlit
+  clumps all clamp to the top stop and read as bright blobs stamped on a dark
+  crown. The shaded end of the ramp is also LIFTED a third toward the mid
+  (`SHADE_LIFT`): raw leafDark plus the interior `deep` term landed near L07 —
+  near-black grit in every crown, and a leaf in shadow is still lit by the
+  violet sky (SHADOW_TRANSFER bottoms out at 0.62, not 0).
 
 ## Conventions
 

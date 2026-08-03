@@ -13,9 +13,23 @@
 // can be aimed by (tilt, yaw, 0) and a clump can still take a free tumble.
 
 import * as THREE from 'three'
-import { C } from '../palette.js'
+import { C, LIGHT } from '../palette.js'
 
 const TAU = Math.PI * 2
+
+// The key's bearing on the ground plane. A canopy ramped by HEIGHT alone reads
+// as noise from this game's 40-degree camera: every mass presents its equator,
+// so the ramp resolves into concentric bands rather than into a light side and
+// a dark side, and the eye reads the leftover per-clump jitter instead. Ramping
+// along the sun's bearing as well is what turns a bag of green spheres into a
+// lit crown — and it is free, because the colour is already per-instance and
+// baked once. 0.24 is most of a ramp stop — enough that a mass has an unlit
+// side, and low enough that the sunlit clumps do not all clamp to the top stop
+// and read as bright blobs stamped onto a dark crown.
+const SUN_H = Math.hypot(LIGHT.sunDir[0], LIGHT.sunDir[2])
+const SUN_X = LIGHT.sunDir[0] / SUN_H
+const SUN_Z = LIGHT.sunDir[2] / SUN_H
+const SUN_FACE = 0.24
 
 /**
  * Species tables.
@@ -89,7 +103,11 @@ export const SPECIES = {
     clumpR: [0.16, 0.25],
     fill: [5, 8],
     crownLift: 0.28,
-    leaf: [C.leafDark, C.leaf, '#b0ac5c'],
+    // A warmer cap than the other two species, but only by hue: the old
+    // '#b0ac5c' was L52 against the canopy's L36 top stop, so a blossom tree in
+    // a grove of broadleaf read as sun-bleached — one dead-looking tree in
+    // every line of healthy ones.
+    leaf: [C.leafDark, C.leaf, '#92952d'],
   },
 }
 
@@ -103,11 +121,20 @@ export const BUSH = { rx: 0.62, ry: 0.34, y: 0.3, lobes: [3, 5] }
 
 // Canopy ramp: shaded underside -> mid -> sunlit top, applied as an absolute
 // per-instance colour so the gradient is continuous, not three discrete greens.
-const LEAF_LOW = new THREE.Color(C.leafDark)
+//
+// The shaded end is leafDark LIFTED a third of the way to the mid. Raw leafDark
+// is L18, and an interior clump then took another -0.11 from `deep` and landed
+// near L07 — near-black grit scattered through every crown, and the one thing
+// in the grove capture that read as procedural rather than painted. The
+// reference's darkest canopy pixel is a dark GREEN; it never reaches black,
+// because a leaf in shadow is still lit by the violet sky (SHADOW_TRANSFER
+// bottoms out at 0.62, not 0). Same lift on the shrub ramp for the beds.
+const SHADE_LIFT = 0.34
 const LEAF_MID = new THREE.Color(C.leaf)
+const LEAF_LOW = new THREE.Color(C.leafDark).lerp(LEAF_MID, SHADE_LIFT)
 export const LEAF_TOP = new THREE.Color(C.leafLight)
-export const SHRUB_LOW = new THREE.Color(C.leafDark)
 export const SHRUB_TOP = new THREE.Color(C.shrub)
+export const SHRUB_LOW = new THREE.Color(C.leafDark).lerp(SHRUB_TOP, SHADE_LIFT)
 const BARK = new THREE.Color(C.trunk)
 const _leaf = new THREE.Color()
 
@@ -117,15 +144,23 @@ const picki = (rnd, [a, b]) => a + Math.floor(rnd() * (b - a + 1))
 
 /** hN 0 = underside, 1 = top of the crown. `deep` darkens interior clumps. */
 function leafColor(hN, deep, rnd, low, mid, top) {
-  if (hN < 0.5) _leaf.copy(low).lerp(mid, hN * 2)
-  else _leaf.copy(mid).lerp(top, (hN - 0.5) * 2)
+  const h = hN < 0 ? 0 : hN > 1 ? 1 : hN // the directional term overshoots both ends
+  if (h < 0.5) _leaf.copy(low).lerp(mid, h * 2)
+  else _leaf.copy(mid).lerp(top, (h - 0.5) * 2)
   // Saturation jitter is deliberately tight: the reference holds 38-43% from
   // core to crown, so a +/-0.09 swing was pushing a fifth of the canopy outside
   // the band the whole art direction is measured in.
+  //
+  // The lightness jitter is tight for the same reason one step down: it is
+  // per-CLUMP, so it is the highest frequency signal in the canopy and reads as
+  // grain, not as shading. The ramp is what should carry the value — jitter
+  // only has to stop neighbouring clumps from looking stamped. `deep` likewise
+  // came down from 0.11: the light side of a mass now comes from the sun term
+  // below, so darkening the interior no longer has to do that job alone.
   return _leaf.offsetHSL(
     (rnd() - 0.5) * 0.03,
     (rnd() - 0.5) * 0.05,
-    (rnd() - 0.5) * 0.05 - deep * 0.11,
+    (rnd() - 0.5) * 0.032 - deep * 0.05,
   )
 }
 
@@ -192,7 +227,19 @@ function leafMass(b, cx, cy, cz, rad, n, sp, rnd, low, mid, top) {
     // sky; the equator is already half-buried in its neighbours. A symmetric
     // ramp put the canopy's MODE on the midtone, which is 8 lightness points
     // above where the reference's mode actually sits.
-    clump(b, cx + ox, cy + oy, cz + oz, r, 0.42 + oy / (rad * 1.5), 1 - edge, rnd, low, mid, top)
+    // ...plus which way the clump faces relative to the key (SUN_FACE above).
+    const face = (ox * SUN_X + oz * SUN_Z) / rad
+    clump(
+      b,
+      cx + ox,
+      cy + oy,
+      cz + oz,
+      r,
+      0.38 + oy / (rad * 1.5) + face * SUN_FACE,
+      1 - edge,
+      rnd,
+      low, mid, top,
+    )
   }
 }
 

@@ -187,11 +187,33 @@ export const C = {
   //
   // Rendered ~= albedo here (key + ambient ~= white), so these ARE those
   // numbers with a little headroom for the clumps that face the sun square on.
-  leafLight: '#9e9e48', // sun-struck crown: h60 s37 L45 — yellow, not emerald
-  leaf: '#5c692e', // h73 s39 L30 — the mode of the reference canopy
-  leafDark: '#32401b', // h83 s41 L18 — shaded interior: deeper AND greener
-  shrub: '#727836', // h66 s38 L34 — planter beds read a touch lighter than tree
-  trunk: '#8d6437', // reference bark is a grey-warm brown, not a saturated tan
+  // ...and re-measured against the RENDER, which is the only test that counts.
+  // Binning the canopy crops of a capture against the same crops of the ref
+  // (tools + method above) still read mode L42 / hue 67 / sat 24 against the
+  // reference's L22 / 77 / 38 — the exact failure the paragraph above describes,
+  // diagnosed but never actually paid off in the albedos. Three points, all in
+  // the same direction: the ramp comes DOWN (a canopy is mostly its own shade,
+  // and only its cap is sun-struck), it goes GREENER, and it gains the
+  // saturation the violet ambient eats out of a green. Sat is deliberately
+  // pushed PAST the reference's 38: averaging a hundred differently-lit clumps
+  // per crown desaturates the read by ~10 points before the ambient does.
+  // Second pass on saturation: at s46-50 albedo the CROWNS still rendered at
+  // s24-33 against the reference's s42-43, while lightness and hue had already
+  // landed. Two things eat it and neither is a paint error — the violet ambient
+  // adds blue to a green surface, and a crown patch is an average of ~100
+  // differently-lit clumps. So the albedo carries the compensation: s56-60 in,
+  // ~s40 out. This is the one place in the palette that is deliberately not a
+  // measured reference value, because the measured value does not survive the
+  // trip through this rig.
+  leafLight: '#858f28', // sun-struck cap: h66 s56 L36 — still yellow, not emerald
+  leaf: '#52691c', // h78 s58 L26 — the mode of the reference canopy
+  leafDark: '#2d4511', // h88 s60 L17 — shaded interior: deeper AND greener
+  shrub: '#626f1f', // h70 s56 L28 — beds read a touch lighter than the tree core
+  // Bark came down with the canopy. At L39 s45 a trunk rendered rgb(145,100,62)
+  // — a bright orange stick under a green crown, and the most saturated warm
+  // thing in a frame whose whole plaza is a pastel. It is a support, not a
+  // subject: h28 s34 L33.
+  trunk: '#715238', // reference bark is a grey-warm brown, not a saturated tan
   flowerWhite: '#fbf5ea',
   flowerPink: '#f4aac4',
   flowerYellow: '#f7dc8c',
@@ -325,6 +347,10 @@ export const LIGHT = {
     masonryShade: [122, 85, 144], // +/- 8
     bowlShade: [91, 71, 154],
     bowlSun: [200, 143, 225],
+    // A SUNLIT-CAP reading, i.e. the brightest few percent of the canopy — not
+    // a value the crown as a whole should hit. When the two disagree, believe
+    // leafModeL below: a canopy that meets leafCrown on average is the
+    // half-stop-hot failure the leaf* comments describe.
     leafCrown: [146, 140, 67], // was [146,164,87] — measured G/R is 0.96, not 1.12
     leafCore: [43, 47, 18],
     // and the shape of the distribution, which a two-patch check cannot see:

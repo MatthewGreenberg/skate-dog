@@ -15,6 +15,7 @@ import { updatePlayer, resetPlayer } from '../player/PlayerController.js'
 
 const RADIUS = 0.5
 const RAMP_OVER = 1.0
+const CAP_STEP = 0.3 // mirror of colliders.js: caps are landable, not steppable
 
 const fails = []
 const notes = []
@@ -69,7 +70,8 @@ function deepestOverlap(x, z, feetY, radius = RADIUS) {
     const qx = Math.min(Math.max(lx, -c.hw), c.hw)
     const qz = Math.min(Math.max(lz, -c.hd), c.hd)
     const top = c.shape === 'flat' ? c.top : rampY(c, qz + c.hd - RAMP_OVER / 2)
-    if (top <= limit) continue
+    const inside = Math.abs(lx) < c.hw && Math.abs(lz) < c.hd
+    if (top <= (c.type === 'cap' ? feetY + (inside ? CAP_STEP : 0.02) : limit)) continue
     const ox = lx - qx
     const oz = lz - qz
     const d = Math.hypot(ox, oz)
@@ -97,7 +99,8 @@ function bruteResolve(x, z, feetY, passes = 8) {
       const qx = Math.min(Math.max(lx, -c.hw), c.hw)
       const qz = Math.min(Math.max(lz, -c.hd), c.hd)
       const top = c.shape === 'flat' ? c.top : rampY(c, qz + c.hd - RAMP_OVER / 2)
-      if (top <= limit) continue
+      const inside = Math.abs(lx) < c.hw && Math.abs(lz) < c.hd
+      if (top <= (c.type === 'cap' ? feetY + (inside ? CAP_STEP : 0.02) : limit)) continue
       const ox = lx - qx
       const oz = lz - qz
       const d2 = ox * ox + oz * oz
@@ -113,6 +116,10 @@ function bruteResolve(x, z, feetY, passes = 8) {
         const ez = c.hd - Math.abs(lz)
         if (ex < ez) ((nx = Math.sign(lx) || 1), (nz = 0), (depth = ex + RADIUS))
         else ((nx = 0), (nz = Math.sign(lz) || 1), (depth = ez + RADIUS))
+        // same per-pass unwedge cap as the shipped solver — without it the
+        // reference "escapes" wedges via oversized ejects resolveCollision
+        // deliberately forbids, and reports them as broad-phase misses
+        depth = Math.min(depth, RADIUS)
       }
       px += (c.c * nx + c.s * nz) * depth
       pz += (-c.s * nx + c.c * nz) * depth
@@ -450,6 +457,53 @@ function clearInput() {
         `approaching wall (${worst.w.x.toFixed(2)},${worst.w.z.toFixed(2)}) speed ${worst.speed} dt 1/${Math.round(1 / worst.dt)}`,
     )
   else ok('walls', `${runs} runs, deepest residual overlap ${worst.pen.toFixed(3)}m, max per-frame move ${worst.step.toFixed(3)}m`)
+}
+
+// =================================================================
+// 1b. deck-side runs at the low caps flanking the staircases
+// =================================================================
+// Section 1 only approaches a wall from its own base level, so it never saw
+// this: the stair dividers and skirt caps top out at exactly deck + STEP_UP,
+// and from the deck the plain limit test stepped you up and OVER them. A cap
+// must block from the ground — landable from the air, never steppable.
+{
+  const runs = [
+    { name: 'stairB divider W', wx: 12.5, wz: -12.4, x: 12.4, z: -14.5, dx: 0, dz: 1 },
+    { name: 'stairB divider E', wx: 23.6, wz: -12.4, x: 23.6, z: -14.5, dx: 0, dz: 1 },
+    { name: 'stairC wall W', wx: 26.2, wz: 1.4, x: 26.2, z: -1.8, dx: 0, dz: 1 },
+    { name: 'stairC wall E', wx: 31.8, wz: 1.4, x: 31.8, z: -1.8, dx: 0, dz: 1 },
+    { name: 'pad1 south skirt', wx: -9, wz: 21.6, x: -9, z: 19, dx: 0, dz: 1 },
+    { name: 'pad2 west skirt', wx: 2.5, wz: 21.6, x: 2.5, z: 24.5, dx: 0, dz: -1 },
+  ]
+  let bad = 0
+  for (const r of runs) {
+    const wc = COLLIDERS.find((c) => c.id === 'wall' && c.x === r.wx && c.z === r.wz)
+    for (const speed of [8, 13]) {
+      resetPlayer()
+      clearInput()
+      const gy = groundHeightAt(r.x, r.z)
+      P.pos.set(r.x, gy, r.z)
+      P.heading = Math.atan2(r.dx, r.dz)
+      P.vel.set(r.dx * speed, 0, r.dz * speed)
+      let entered = false
+      let climbed = false
+      for (let i = 0; i < 240; i++) {
+        updatePlayer(1 / 120)
+        const { lx, lz } = local(wc, P.pos.x, P.pos.z)
+        if (Math.abs(lx) < wc.hw && Math.abs(lz) < wc.hd) entered = true
+        if (P.pos.y > gy + 0.3) climbed = true
+      }
+      if (entered || climbed) {
+        bad++
+        fail(
+          'walls/cap-step',
+          `${r.name}: riding the deck at ${speed} m/s ${entered ? 'entered the wall footprint' : 'climbed onto the cap'} ` +
+            `(cap top ${wc.top.toFixed(2)}, deck ${gy.toFixed(2)} — top is within STEP_UP of the deck)`,
+        )
+      }
+    }
+  }
+  if (!bad) ok('walls/cap-step', `${runs.length * 2} deck-side runs at the stair-flanking caps, all blocked`)
 }
 
 // =================================================================

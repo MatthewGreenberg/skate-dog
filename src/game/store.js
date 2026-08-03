@@ -14,6 +14,7 @@ export const useGame = create((set, get) => ({
   bones: 0, // floating bones collected (of levelData BONES)
   trickText: '',
   trickPoints: 0,
+  trickLive: false, // trick still in progress — the popup holds instead of fading
   started: false,
   paused: false,
   // phones start at 'low' (AO 10 samples, no MSAA, halved particle emission);
@@ -24,8 +25,9 @@ export const useGame = create((set, get) => ({
   setPaused: (paused) => set({ paused }),
   setQuality: (quality) => set({ quality }),
   addScore: (n) => set({ score: Math.round(get().score + n) }),
-  showTrick: (trickText, trickPoints) => set({ trickText, trickPoints }),
-  clearTrick: () => set({ trickText: '', trickPoints: 0 }),
+  showTrick: (trickText, trickPoints, trickLive = false) => set({ trickText, trickPoints, trickLive }),
+  settleTrick: () => set({ trickLive: false }), // trick over, let the popup fade
+  clearTrick: () => set({ trickText: '', trickPoints: 0, trickLive: false }),
   setCombo: (combo) => set({ combo }),
   collectBone: () => set({ bones: get().bones + 1 }),
   loseLife: () => set({ lives: Math.max(0, get().lives - 1) }),

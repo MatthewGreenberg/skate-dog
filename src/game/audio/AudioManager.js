@@ -1,17 +1,44 @@
-// Fully synthesised audio: oscillators + procedurally filled noise buffers, no
-// files. Inert until unlockAudio() runs from a user gesture — nothing here
-// touches AudioContext at import time.
+// Fully synthesised SFX (oscillators + noise buffers) plus a three-track
+// soundtrack from public/songs. Inert until unlockAudio() runs from a user
+// gesture — nothing here touches AudioContext at import time.
 
 import { P, on } from '../store.js'
 
 const MASTER = 0.55, VOICES = 8
+const MUSIC_VOL = 0.15
+const MUSIC = [
+  '/songs/Skate Dog.mp3',
+  '/songs/Skate Dog 1.mp3',
+  '/songs/Skate Dog 2.mp3',
+  '/songs/Skate Dog 3.mp3',
+]
 
 let ctx = null, master = null, started = false, muted = false, grinding = false
 let whiteBuf = null, pinkBuf = null, loopEnd = 0
 let breezeLP = null, breezeGain = null, rollBP = null, rollGain = null
 let grindBP = null, grindLevel = null, grindGain = null
+let music = null, musicIdx = 0
 const loops = [], unsubs = []
 let breezePhase = 0, birdTimer = 4, lastHalf = 0
+
+function playMusicTrack() {
+  if (!music) return
+  music.src = MUSIC[musicIdx]
+  music.volume = muted ? 0 : MUSIC_VOL
+  music.play().catch(() => { /* gesture / autoplay policy */ })
+}
+
+function startMusic() {
+  if (music) return
+  music = new Audio()
+  music.preload = 'auto'
+  music.addEventListener('ended', () => {
+    musicIdx = (musicIdx + 1) % MUSIC.length
+    playMusicTrack()
+  })
+  musicIdx = 0
+  playMusicTrack()
+}
 
 // per-surface paw tick { freq, Q, gain, decay } and rolling-noise { freq×, gain× }
 const PAW = {
@@ -182,12 +209,12 @@ function sfxShimmer() {
     const t0 = t + i * 0.05
     for (const det of [-7, 8]) {
       const o = osc('sine', hz, det), g = gn(0)
-      env(g.gain, t0, 0.065, 0.01, 0.5)
+      env(g.gain, t0, 0.0325, 0.01, 0.5)
       o.connect(g); g.connect(v.g); o.start(t0); o.stop(t0 + 0.6); v.add(o, g)
     }
   })
   const s = noise(false, false), f = flt('highpass', 5200), ng = gn(0)
-  env(ng.gain, t, 0.05, 0.06, 0.6)
+  env(ng.gain, t, 0.025, 0.06, 0.6)
   s.connect(f); f.connect(ng); ng.connect(v.g)
   s.start(t, Math.random() * 2); s.stop(t + 0.75); v.add(s, f, ng)
 }
@@ -268,6 +295,7 @@ export function startAudio() {
   }
 
   lastHalf = Math.floor((P.run || 0) / Math.PI)
+  startMusic()
   unsubs.push(
     on('jump', sfxJump), on('land', sfxLand), on('trick', sfxTrick), on('bail', sfxBail),
     on('bone', ({ big }) => sfxTrick({ points: big ? 2500 : 700 })),
@@ -324,6 +352,7 @@ export function updateAudio(dt) {
 export function setMuted(m) {
   muted = !!m
   if (ctx) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.03)
+  if (music) music.volume = muted ? 0 : MUSIC_VOL
 }
 
 export function isMuted() { return muted }
@@ -334,6 +363,8 @@ export function disposeAudio() {
   for (let i = 0; i < pool.length; i++) { if (pool[i]) pool[i].free(); pool[i] = null }
   for (const l of loops) { stopNode(l); l.disconnect() }
   loops.length = 0
+  if (music) { music.pause(); music.src = ''; music = null }
+  musicIdx = 0
   if (ctx) ctx.close().catch(() => { /* already closed */ })
   ctx = null
   master = breezeLP = breezeGain = rollBP = rollGain = grindBP = grindLevel = grindGain = null

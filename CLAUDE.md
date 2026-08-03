@@ -172,7 +172,15 @@ src/game/
                        8.33ms grid), an 11cm-per-step stutter at speed with a
                        perfect frame rate. Safe because every response in
                        step() is rate-based and dt-scaled.
-                       Scoring: a grind claims
+                       Scoring: `airTrick()` is the ONE table of what an air is
+                       worth so far — stepAir flushes it to the trick tape every
+                       0.1s (live name + multiplied value, `trickLive` in the
+                       store holds the popup open instead of fading it) and
+                       scoreAir reads the same function at landing, so the
+                       popup can never name a trick the landing doesn't pay.
+                       Air points still BANK at landing, not mid-air: a bail
+                       shows 'Bail!' and you lose them. Grind points DO pay
+                       live (below). A grind claims
                        its combo slot at lock-on and pays the score LIVE
                        (42 pts/s x the chain multiplier, flushed every 0.15s —
                        never per-frame store sets), settling the rounding
@@ -406,6 +414,23 @@ plan and demands 96%+ closed.
   the lip angle, conserving speed, and overshoots to a slightly NEGATIVE
   horizontal so a vert air re-enters the transition it left instead of clearing
   the flat overhang. Banks sit below `VERT_LO` and still launch you forward.
+- **A wall cap is landable, never steppable.** The dividers flanking the
+  stairs and the deck skirt caps top out at exactly deck + 0.55 = feetY +
+  STEP_UP, so the plain limit test hoisted you up and OVER every wall beside
+  a staircase (and an air whose feet were within 0.55 of the cap top passed
+  straight through it). Caps now take `CAP_STEP` instead of STEP_UP, and it is
+  split by where the body is: 0.3 when the centre is INSIDE the footprint
+  (a landing frame sinks ~0.12m below the top before stepAir's land check
+  fires — a solid cap side-ejects the clean landing) but ~0 when OUTSIDE
+  (pressing into the FACE is always a wall; a flat band there let the body
+  embed while "steppable" and ejected the accumulated depth in one 0.32m
+  lurch when the feet crossed the threshold). Making the caps solid also
+  created corner pockets (divider face + planter corner) that the resolver's
+  4 passes couldn't walk out of — it runs 8 now, and breaks early the first
+  pass nothing moves. collision.check.js `walls/cap-step` rides the deck into
+  every stair-flanking cap and asserts it blocks; its bruteResolve reference
+  mirrors the shipped eject cap or wedge escapes it can't do read as
+  broad-phase misses.
 - **Wall response is rate-based, or the camera lurches.** `slideAlongWall`
   once cut speed 55% and snapped the heading 35-80% toward the tangent *per
   substep* — a head-on hit lost ~96% of its speed and whipped the rendered dog

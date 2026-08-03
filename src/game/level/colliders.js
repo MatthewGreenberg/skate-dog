@@ -7,6 +7,19 @@ import { SOLIDS, WALLS, PLANTERS, PERIMETER, BENCHES, LAMPS } from './levelData.
 import { bowlHeight, bowlNormal, isInsideBowl } from './bowlGeometry.js'
 
 export const STEP_UP = 0.55 // how far the player can be pulled up onto a ledge
+// A wall cap is landable (from the air) but never steppable (from below): the
+// dividers flanking the stairs and the deck skirt caps top out at exactly
+// deck + 0.55 = feetY + STEP_UP, so the plain limit test hoisted you up and
+// over every wall beside a staircase (and let an air whose feet were within
+// STEP_UP of the cap top pass straight through the wall). The allowance is
+// only for bodies ABOVE the cap: a landing frame sinks ~0.12m below the top
+// before stepAir's land check fires (14.8 m/s off a 5m air over a 1/120
+// substep), and a solid cap would side-eject the clean landing. A body whose
+// centre is OUTSIDE the footprint is pressing into the FACE — always a wall.
+// A flat band there embeds you while "steppable" and ejects the accumulated
+// depth in one frame when your feet cross the threshold (a 0.32m lurch
+// skimming pad2's skirt, collision.check.js ramps/teleport).
+const CAP_STEP = 0.3
 const RAMP_OVER = 1.0 // ramp footprint overhang into the deck it feeds
 const CELL = 6
 
@@ -166,7 +179,7 @@ export function sampleSurface(x, z, feetY, out = _out) {
 
     if (c.shape === 'flat') {
       if (c.top <= rampTop + 0.02) continue
-      if (c.top <= limit && c.top > out.y) {
+      if (c.top <= (c.type === 'cap' ? feetY + CAP_STEP : limit) && c.top > out.y) {
         out.y = c.top
         out.nx = 0
         out.ny = 1
@@ -225,10 +238,15 @@ export function resolveCollision(p, feetY, radius, push = _push) {
   push.z = 0
   const limit = feetY + STEP_UP
 
-  // 4 passes: 2 converged everywhere except corner pockets where two solids
+  // 8 passes: 2 converged everywhere except corner pockets where two solids
   // push in sequence (planter + wall cap on deckA) — the extra passes let the
-  // point walk around the corner instead of oscillating in the wedge
-  for (let pass = 0; pass < 4; pass++) {
+  // point walk around the corner instead of oscillating in the wedge. 4 was
+  // enough until the stair-flanking caps went solid-from-the-ground: the
+  // divider-face + planter-corner pockets they added need up to 8 to escape
+  // (collision.check.js broadphase measures parity against a no-grid 8-pass
+  // reference). The loop breaks the first pass nothing moves, so the extra
+  // passes cost nothing outside a pocket.
+  for (let pass = 0; pass < 8; pass++) {
     let moved = false
     const b = bucket(p.x, p.z)
     const rampTop = rampTopAt(p.x, p.z, b)
@@ -248,7 +266,8 @@ export function resolveCollision(p, feetY, radius, push = _push) {
       // the ramp at the nearest point of its footprint instead — the low end
       // reads ~0 and lets you roll on, the cheeks and the top still block.
       const top = c.shape === 'flat' ? c.top : rampY(c, qz + c.hd)
-      if (top <= limit) continue
+      const inside = Math.abs(lx) < c.hw && Math.abs(lz) < c.hd
+      if (top <= (c.type === 'cap' ? feetY + (inside ? CAP_STEP : 0.02) : limit)) continue
       const ox = lx - qx
       const oz = lz - qz
       const d2 = ox * ox + oz * oz

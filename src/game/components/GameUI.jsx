@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useProgress } from '@react-three/drei'
 import { useGame } from '../store.js'
 import { touch, touchJumpDown, touchJumpUp, TOUCH } from '../input.js'
-import { unlockAudio } from '../audio/AudioManager.js'
+import { unlockAudio, setMuted, isMuted } from '../audio/AudioManager.js'
 import { PHOTO } from '../photo.js'
 import './ui.css'
 
@@ -82,6 +82,7 @@ function BonesPill() {
 function TrickPopup() {
   const trickText = useGame((s) => s.trickText)
   const trickPoints = useGame((s) => s.trickPoints)
+  const trickLive = useGame((s) => s.trickLive)
   const ref = useRef(null)
   const prevText = useRef('')
 
@@ -103,6 +104,10 @@ function TrickPopup() {
       }
     }
     prevText.current = trickText
+    // Mid-trick the tape never times out — you are still in the air or on the
+    // rail, and the value is still climbing. Landing (or bailing) drops `live`
+    // and starts the fly-out from there.
+    if (trickLive) return
     // trickPoints is a dep so every flush pushes both timers back: the popup
     // holds while the counter moves, flies out 1.1s after it stops, and only
     // unmounts once the fly-out has played.
@@ -112,11 +117,11 @@ function TrickPopup() {
       clearTimeout(tOut)
       clearTimeout(tClear)
     }
-  }, [trickText, trickPoints])
+  }, [trickText, trickPoints, trickLive])
 
   if (!trickText) return null
   return (
-    <div className="hud-trick" ref={ref}>
+    <div className={trickLive ? 'hud-trick is-live' : 'hud-trick'} ref={ref}>
       <div className="hud-trick-name">{trickText}</div>
       {trickPoints > 0 && <div className="hud-trick-points">+{NUM.format(trickPoints)}</div>}
     </div>
@@ -184,6 +189,47 @@ function JumpButton() {
   )
 }
 
+function MuteWave() {
+  const [muted, setMute] = useState(() => isMuted())
+  const pathRef = useRef(null)
+
+  useEffect(() => {
+    let raf = 0
+    const tick = (t) => {
+      const el = pathRef.current
+      if (el) {
+        const amp = muted ? 1.2 : 7
+        const phase = t * 0.004
+        let d = 'M 0 12'
+        for (let x = 1; x <= 48; x++) {
+          const y = 12 + Math.sin(x * 0.42 + phase) * amp
+          d += ` L ${x} ${y.toFixed(2)}`
+        }
+        el.setAttribute('d', d)
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [muted])
+
+  return (
+    <button
+      className={muted ? 'hud-mute is-muted' : 'hud-mute'}
+      aria-label={muted ? 'Unmute' : 'Mute'}
+      onClick={() => {
+        const next = !isMuted()
+        setMuted(next)
+        setMute(next)
+      }}
+    >
+      <svg viewBox="0 0 48 24" aria-hidden="true">
+        <path ref={pathRef} d="M 0 12 L 48 12" />
+      </svg>
+    </button>
+  )
+}
+
 const LEGEND = TOUCH
   ? [
       ['Stick', 'move · spin · grab · flip'],
@@ -193,45 +239,23 @@ const LEGEND = TOUCH
       ['Space', 'jump'],
       ['Arrows / WASD', 'move'],
       ['↑ in air', 'grab'],
-      ['↓ in air', 'kickflip'],
+      ['↓ in air', 'dogflip'],
       ['← → in air', 'spin'],
     ]
 
 // ---------------------------------------------------------------- loading
 // The two glb rigs are ~9MB compressed and every texture in the park is painted
 // into a canvas at load, so there IS a wait to fill. Progress comes off three's
-// DefaultLoadingManager via drei; the quips just make it a place to look.
-const QUIPS = [
-  'Waxing the coping…',
-  'Teaching the dachshund to ollie…',
-  'Painting 40,000 leaves…',
-  'Bolting the handrails on…',
-  'Hiding five bones…',
-  'Chalking the bowl…',
-]
-
+// DefaultLoadingManager via drei.
 function LoadingScreen({ progress }) {
-  const [quip, setQuip] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setQuip((q) => (q + 1) % QUIPS.length), 1600)
-    return () => clearInterval(id)
-  }, [])
   const pct = Math.round(progress)
   return (
     <div className="hud-load">
-      <div className="hud-load-dog" aria-hidden="true">
-        <span className="hud-load-pup">🐕</span>
-        <BoneIcon />
-      </div>
       <div className="hud-load-bar">
         <div className="hud-load-fill" style={{ width: `${pct}%` }} />
         <div className="hud-load-marker" style={{ left: `${pct}%` }}>
           <BoneIcon />
         </div>
-      </div>
-      <div className="hud-load-row">
-        <span className="hud-load-quip">{QUIPS[quip]}</span>
-        <span className="hud-load-pct">{pct}%</span>
       </div>
     </div>
   )
@@ -261,7 +285,6 @@ function StartOverlay() {
   return (
     <div className={out ? 'hud-start is-out' : 'hud-start'}>
       {/* the SKATE DOG title is troika text in the scene — see Intro.jsx */}
-      <p className="hud-sub">Ride the pup, bomb the plaza, grind every rail.</p>
       <div className="hud-legend">
         {LEGEND.map(([key, what]) => (
           <div key={key}>
@@ -308,6 +331,7 @@ export default function GameUI() {
       <div className={live ? 'hud-widgets' : 'hud-widgets is-idle'}>
         <ScorePill />
         <BonesPill />
+        {live && <MuteWave />}
       </div>
       <TrickPopup />
       {live && TOUCH && (

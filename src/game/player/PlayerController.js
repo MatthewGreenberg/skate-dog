@@ -105,6 +105,7 @@ const trick = {
 
   grindShown: 0, // multiplied points already added to the score this grind
   grindFlush: 0,
+  airFlush: 0, // countdown to the next live trick-tape push
 }
 
 // A multiplier is for a CHAIN, not for landing tricks back to back: this is
@@ -520,6 +521,22 @@ function stepAir(dt) {
   }
   if (trick.grabbing) trick.grabTime += dt
 
+  // Live trick tape. The name and its value used to appear only at landing, so
+  // a 1.5s vert air read as nothing happening. Flushed every 0.1s (never
+  // per-frame — that's a zustand set at 120fps) at the multiplier the landing
+  // would pay. The points still BANK at landing: bail and you lose them, which
+  // is the whole tension of a long air.
+  trick.airFlush -= dt
+  if (trick.airFlush <= 0) {
+    trick.airFlush = 0.1
+    const { name, pts } = airTrick()
+    if (pts > 0) {
+      const chain = trick.combo + 1 // award() increments before it multiplies
+      const total = Math.round(pts * (1 + trick.combo * 0.5))
+      useGame.getState().showTrick(chain > 1 ? `${name}  x${chain}` : name, total, true)
+    }
+  }
+
   P.vel.y -= G * dt
 
   const prevY = P.pos.y
@@ -662,7 +679,7 @@ function stepGrind(dt) {
       const g = useGame.getState()
       g.addScore(total - trick.grindShown)
       trick.grindShown = total
-      g.showTrick(trick.combo > 1 ? `Grind  x${trick.combo}` : 'Grind', total)
+      g.showTrick(trick.combo > 1 ? `Grind  x${trick.combo}` : 'Grind', total, true)
     }
   }
 
@@ -725,6 +742,8 @@ function bail() {
   P.respawnTimer = 1.25
   P.vel.set(P.vel.x * 0.3, 2.5, P.vel.z * 0.3)
   useGame.getState().loseLife()
+  // the live tape is showing points that just stopped being real — say so
+  useGame.getState().showTrick('Bail!', 0)
   if (useGame.getState().lives <= 0) useGame.setState({ lives: 3 })
   trick.combo = 0
   useGame.getState().setCombo(0)
@@ -757,14 +776,19 @@ function stepBail(dt) {
 }
 
 // ------------------------------------------------------------------ scoring
-function scoreAir() {
+// What the current air is worth SO FAR. Read live by stepAir for the trick tape
+// and again by scoreAir at landing — one table, so the popup can never name a
+// trick the landing doesn't pay for. Every term is monotonic in the air except
+// Pool Gap, which is tested against the live position both times (over the hole
+// it isn't earned yet, so it correctly doesn't show).
+function airTrick() {
   const halves = Math.floor(trick.spinTotal / Math.PI + 0.15)
   let pts = 0
   let name = ''
 
   if (trick.dogSpins > 0) {
     pts += trick.dogSpins * 160
-    name = trick.dogSpins > 1 ? `${trick.dogSpins}x Kickflip` : 'Kickflip'
+    name = trick.dogSpins > 1 ? `${trick.dogSpins}x Dogflip` : 'Dogflip'
   }
   if (halves > 0) {
     pts += halves * 110
@@ -791,6 +815,14 @@ function scoreAir() {
     name = 'Ollie'
     pts = 30 + Math.round(trick.air * 40)
   }
+  return { name, pts }
+}
+
+function scoreAir() {
+  const { name, pts } = airTrick()
+  // A corner-cut can clear the pool without 1s hang time, so fire the shimmer
+  // here if bigair never crossed the mid-air threshold.
+  if (trick.overPool && !trick.bigAir && poolK(P.pos.x, P.pos.z) > 1) emit('bigair', { pos: P.pos })
 
   trick.spinTotal = 0
   trick.dogSpins = 0
@@ -798,7 +830,11 @@ function scoreAir() {
   trick.air = 0
   trick.bigAir = false
   trick.overPool = false
+  // pts can only be 0 here if the live tape never showed anything either —
+  // except a Pool Gap flown and then landed back IN the bowl, which is why the
+  // settle is unconditional.
   if (pts > 0) award(name, pts)
+  else useGame.getState().settleTrick()
 }
 
 function award(name, pts) {

@@ -571,7 +571,7 @@ function land(s) {
   // landing. The pop reads as the landing pose; crouch and dust mask it. The
   // clearance lift snaps with it — the analytic curvature is already known.
   P.up.copy(P.surfUp)
-  P.surfLift = Math.min(0.16, P.surfCurv * 0.3)
+  P.surfLift = Math.min(0.34, P.surfCurv * 0.66)
 
   // landing mid-flip only bails if the dog is properly inverted AND it hurt.
   // Below that the flip snaps to the nearest whole turn — a one-key trick you
@@ -913,17 +913,19 @@ function updateAnim(dt) {
   const pitchTarget = P.state === 'air' ? THREE.MathUtils.clamp(-P.vel.y * 0.035, -0.3, 0.3) : 0
   P.dogPitch = damp(P.dogPitch, P.state === 'bail' ? P.dogPitch : pitchTarget, 8, dt)
 
-  // The rendered dog is ~1.6m nose to tail (fitted length x the 1.22 group
-  // scale): its straight body chord on the 2.6m quarter sags ~12cm below the
-  // arc. Lift the rig along the normal by measured path curvature (turn of
+  // The rendered dog is ~2.3m nose to tail (fitted length x LONG x the 1.58
+  // group scale): its straight body chord on the 2.6m quarter sags ~26cm below
+  // the arc — chord depth is L^2/8R, so it grew with the SQUARE of the size
+  // bump (it was 12cm at 1.6m, gain 0.3 / cap 0.16).
+  // Lift the rig along the normal by measured path curvature (turn of
   // surfUp per metre); flats and banks measure 0 and get none. Decay slowly
   // in the air so the launch off a lip keeps its clearance for a beat.
-  // Gain/cap carry MARGIN over the geometric 12.3cm chord requirement: the
+  // Gain/cap carry MARGIN over the geometric 26cm chord requirement: the
   // rise damp and the up damp below both lag a little, and at the top of the
   // quarter the wall is thin enough that "exactly flush" still prints through.
   // The analytic curvature from the sampler (quarters) is exact and instant;
   // the measured turn of surfUp per metre still covers the bowl, whose arcs
-  // the colliders don't parameterise. Max of both, geometric 12.3cm + margin.
+  // the colliders don't parameterise. Max of both, geometric 26cm + margin.
   let lift = 0
   if (P.state === 'ground') {
     let curv = P.surfCurv
@@ -931,7 +933,7 @@ function updateAnim(dt) {
       const dot = THREE.MathUtils.clamp(P.surfUp.dot(prevUp), -1, 1)
       curv = Math.max(curv, Math.acos(dot) / Math.max(P.speed * dt, 1e-4))
     }
-    lift = Math.min(0.16, curv * 0.3)
+    lift = Math.min(0.34, curv * 0.66)
   }
   prevUp.copy(P.surfUp)
   P.surfLift = damp(P.surfLift, lift, lift > P.surfLift ? 25 : 4, dt)

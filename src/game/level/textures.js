@@ -883,6 +883,87 @@ export function grassNormal() {
 // aoMap (channel 1), so it only attenuates ambient/environment light.
 export const AO_BOUNDS = { minX: -46, maxX: 46, minZ: -46, maxZ: 44 }
 
+// the dog's coat ------------------------------------------------------------
+// dog_compressed.glb ships ONE map (baseColor) and no normal or roughness, so
+// the coat is a flat wash of Tripo's baked light and the surface returns the
+// same specular everywhere — the same "reads as plastic" failure the concrete
+// grain above exists to fix, on the thing the camera is always pointed at.
+// Both maps are generated from a single fibre height field so the crest a
+// normal bumps up is also the crest the roughness makes glossier.
+//
+// They ride the ALBEDO's uv channel, which is Tripo's atlas — arbitrary islands
+// with no relation to the coat's real flow. That is fine and it is why the
+// fibre is drawn as a noise-curled field rather than a combed direction: at
+// FUR_TILE across an atlas the strands are sub-millimetre and read as surface,
+// not as a hairstyle. An island seam is a direction change, not a visible line.
+const FUR_TILE = 7
+
+function furHeight() {
+  const S = 256
+  const [c, ctx] = canvas(S, S)
+  ctx.fillStyle = '#808080'
+  ctx.fillRect(0, 0, S, S)
+  ctx.lineCap = 'round'
+  for (let k = 0; k < 3000; k++) {
+    const x = rnd(k, 0, 91) * S
+    const y = rnd(k, 1, 91) * S
+    // curled by a low-frequency field so the coat gets partings and cowlicks
+    // instead of a combed grid, which resolves into moire at chase distance
+    const a = Math.PI / 2 + (noise((x / S) * 3, (y / S) * 3, 7) - 0.5) * 1.7
+    const len = 5 + rnd(k, 2, 91) * 9
+    const v = rnd(k, 3, 91)
+    ctx.strokeStyle = v > 0.5 ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.22)'
+    ctx.lineWidth = 1 + (v > 0.82 ? 1 : 0)
+    // a stroke crossing an edge has to continue on the far side or the tile
+    // seams show as a band of bald coat. Only the wraps that can actually
+    // reach are drawn — drawing all nine unconditionally doubles the alpha of
+    // every interior stroke and costs 9x.
+    const dx = x < len ? S : x > S - len ? -S : 0
+    const dy = y < len ? S : y > S - len ? -S : 0
+    for (let i = 0; i < 4; i++) {
+      if (i & 1 && !dx) continue
+      if (i & 2 && !dy) continue
+      const ox = i & 1 ? dx : 0
+      const oy = i & 2 ? dy : 0
+      ctx.beginPath()
+      ctx.moveTo(x + ox, y + oy)
+      ctx.lineTo(x + ox + Math.cos(a) * len, y + oy + Math.sin(a) * len)
+      ctx.stroke()
+    }
+  }
+  return c
+}
+
+export function dogNormal() {
+  return cached('dogNormal', () => {
+    const t = normalFrom(furHeight(), 1.3)
+    t.repeat.set(FUR_TILE, FUR_TILE)
+    return t
+  })
+}
+
+export function dogRough() {
+  return cached('dogRough', () => {
+    const src = furHeight()
+    const S = src.width
+    const [c, ctx] = canvas(S, S)
+    const img = src.getContext('2d').getImageData(0, 0, S, S)
+    const d = img.data
+    for (let i = 0; i < d.length; i += 4) {
+      // roughnessMap MULTIPLIES material.roughness, so 255 is "as authored".
+      // Fibre crests come down to ~0.86 of it — a lit strand is glossier than
+      // the undercoat between them, and that difference is the whole point.
+      d[i] = d[i + 1] = d[i + 2] = 255 - (d[i] - 128) * 0.55
+    }
+    ctx.putImageData(img, 0, 0)
+    const t = new THREE.CanvasTexture(c)
+    t.wrapS = t.wrapT = THREE.RepeatWrapping
+    t.repeat.set(FUR_TILE, FUR_TILE)
+    t.anisotropy = 4
+    return t
+  })
+}
+
 export function parkAOMap(rects) {
   return cached('parkAO', () => {
     const S = 1024

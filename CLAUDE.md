@@ -73,7 +73,19 @@ src/game/
     colliders.js      simplified collision built from levelData
     parkGeometry.js   plaza / grass / ramp meshes
     bowlGeometry.js   analytic bowl — the drawn surface IS the ridden surface
-    textures.js       every procedural map: albedo, normal, roughness, baked AO
+    textures.js       every procedural map: albedo, normal, roughness, baked AO.
+                      dogNormal/dogRough are the dog's coat — one fibre height
+                      field (short strokes curled by a low-frequency noise
+                      field, so the coat gets partings instead of a combed grid
+                      that moires at chase distance) sobelled into a normal and
+                      remapped into a roughness, so the crest the normal bumps
+                      up is the crest the roughness makes glossier. Strokes near
+                      a tile edge are redrawn wrapped — only the wraps that can
+                      reach, since drawing all nine doubles the alpha of every
+                      interior stroke. They ride the ALBEDO's uv channel, which
+                      is Tripo's arbitrary atlas; at FUR_TILE 7 the strands are
+                      sub-millimetre and read as surface, not as a hairstyle,
+                      and an island seam is a direction change, not a line.
     foliage.js        plant generation, pure data -> instance rows
   components/         Game (canvas + post), Lighting, Skatepark, Props, Player, Effects, UI
                       Intro.jsx = the SKATE DOG title as troika text (drei
@@ -142,12 +154,125 @@ src/game/
                       AudioManager), scores 500 (2500 + ALL BONES! on the 5th)
                       and ticks the HUD bone pill. bones.check.js asserts the
                       float band and spacing.
-                      Rider.jsx = boy.glb + the pose table that drives it
+                      Rider.jsx = boy.glb + the pose table that drives it. The
+                      ride pose is a real crouch, and the two legs' angles are
+                      MIRRORED across the pair (front thigh 0.68 forward / shin
+                      0.42 back, rear the other way) so both legs DROP the same
+                      amount — body.position.y takes the mean of the two, so an
+                      asymmetric crouch floats one foot and buries the other
+                      (a 0.5/0.54 rear knee left the back foot 8cm in the air).
+                      His shirt and both sleeves ship the SAME orange as the
+                      dog's coat and the warm plaza, so the player unit read as
+                      one blob; recolor.js hue-rotates those maps at load (a
+                      `material.color` tint can't do it — orange times blue is
+                      grey, not teal). SHIFTS is the table: shirt + both sleeves
+                      +168deg to teal, both shoes -28deg (measured hue 25 -> 357,
+                      a real red, not a red-orange). Garments are picked by
+                      `map.name` (GLTFLoader carries the glTF image name
+                      through), the rotation preserves chroma and lightness so
+                      Tripo's baked shading survives, and the shorts are
+                      already blue and left alone. Canvas work is Rider's; the
+                      pixel maths is a separate pure module so it can be checked
+                      in node.
                       Dog.jsx = dog_compressed.glb, fitted and posed the same way
-                      clearCoat.js = swaps both rigs' standard materials for
-                      physical ones and drives their clearcoat. Player.jsx owns
-                      the leva folder ("Clear coat") so one slider moves both —
-                      two useControls on the same path is a duplicate-key clash
+                      — the fit is still measured, dogFit.js's SIZE/LEG only
+                      skew it (length x1.16, height x0.92, limbs x0.78 about
+                      their hips) and Player.jsx's group scale carries the
+                      overall size (1.58). Shortening the legs raises the paws
+                      off the bind floor, so LEG_DROP (bind hips 0.163/0.184,
+                      paws 0.008) comes out of BOTH the model's lift and
+                      backY() or the dog floats and the rider stands on air.
+                      dogFit.js = those numbers, split out because Player and
+                      Rider need them and a component file may not export
+                      shared mutable state (react-refresh). SIZE.long/.tall are
+                      LIVE — Player.jsx's "Dog size" leva folder writes them,
+                      and the fit group's scale and the drop that keeps the paws
+                      on y=0 are applied per frame rather than baked into JSX
+                      props. The rider follows because his feet ride backY(),
+                      which is a function of SIZE.tall. `size` in that folder is
+                      the shared group's scale, so it carries the rider too — a
+                      dog that grows out from under its rider is not a size
+                      control. LEG is deliberately NOT a slider: the limb scales
+                      are set once on the bones. The skull scale (HEAD)
+                      carries the snout and both ears with it; setBone only
+                      writes quaternions, so a bone scale set once survives.
+                      COAT (0xd9a06a) multiplies the ktx2 albedo down into a
+                      richer brown — Tripo's pale tan sat barely a stop off the
+                      warm plaza and the silhouette went missing against it.
+                      Colour multiplies in linear space, so an sRGB tint reads
+                      as an sRGB value scale (0.92,0.71,0.46 -> ~0.78,0.45,0.19).
+                      The GLB carries ONE map (baseColor) and no normal or
+                      roughness map, and it is KTX2 — transcoded straight to a
+                      GPU format, so its pixels never reach the CPU and the
+                      hue-rotate recolor.js plays on the rider is not available.
+                      So the coat gets both: procedural fur maps from
+                      textures.js (dogNormal / dogRough, see below) and a
+                      colour grade in `coatShader`, an onBeforeCompile on that
+                      one shared material. The grade is hue (Rodrigues about
+                      the grey axis — rotates hue, leaves luma, so Tripo's bake
+                      survives), saturation 1.4 and contrast 1.14 about a 0.2
+                      LINEAR pivot — sRGB's 0.5 would crush the whole coat to
+                      black — plus a violet-sky rim (0x8f96de x 0.34, fresnel^3
+                      on outgoingLight) that separates the silhouette from the
+                      warm plaza when he is between the camera and the sun. The
+                      rim is sky WRAP, not a second key: key + ambient still
+                      sums to white, and it sits under the bloom threshold.
+                      All three grade knobs live in ONE module-scope
+                      `COAT_ADJ` uniform object shared by the compiled shader
+                      and the "Dog coat" leva folder — three re-reads
+                      uniform.value every frame, so a slider is live with no
+                      recompile. Its own folder, not Player's: the clash is two
+                      useControls on the same PATH. There is no roughness
+                      slider — assigning `mat.roughness` is a write to a memo
+                      return value and react-hooks/immutability rejects it;
+                      normalScale is mutated in place and passes. The material
+                      comes back out of the fit useMemo rather than through a
+                      ref, because a ref written inside the traverse is a ref
+                      read during render.
+                      Carving bends the whole body: the rear legs and tail hang
+                      off tripoRoot and the entire front half off tripoSpine_0,
+                      so yawing spine + chest (the only two segments between the
+                      hips and the neck) swings shoulders, front legs and head
+                      into the turn while the hips hold the heading. Split
+                      0.8/1.2 so it curves through the shoulders rather than
+                      hinging at the hips, and `lag` whips it on a reversal.
+                      The skull's own yaw came down 0.28 -> 0.14 because it now
+                      inherits the bend. LONG stretches x OUTSIDE these bones,
+                      which flattens the apparent angle of a yaw (the nose lands
+                      at (LONG*cos, sin)) — so a longer dog needs a bigger bend
+                      for the same read: 0.34 raw is ~35deg on screen at 1.16.
+                      The tongue is a capsule, not a bone — the GLB has none.
+                      It is authored at the bind-pose mouth in model space, then
+                      `attach`ed to the skull bone at mount: it used to just sit
+                      at a fixed point on the grounds that the skull moved by a
+                      few hundredths, and the carve bend broke that (the head
+                      swings ~35deg and the tongue stayed behind in mid air).
+                      `attach`, not `add`, so the authored offset, the mesh's
+                      lay-forward rotation, the bone's non-identity rest frame
+                      and its HEAD scale all carry over instead of being typed
+                      in. Two nested groups: the outer is the mount the attach
+                      rewrites, the inner is free for the frame loop's trail. Ears, tail and tongue trail a carve off one
+                      `lag` signal (how far P.lean has run ahead of a damped
+                      copy of itself: zero on a held arc, biggest on a reversal).
+                      The ear springs are ALSO kicked by the rig's own
+                      acceleration (P.vel differenced over the render frame),
+                      which is what pops, landings and wall hits look like —
+                      lean cannot see any of them. Clamped to +-60: a landing
+                      kills 9 m/s inside one 1/120 substep, so the raw number is
+                      in the hundreds, and the clamp is what makes it an impulse
+                      rather than a spike (it also swallows a respawn's
+                      teleport). `wiggle` (WiggleBone) was considered for this
+                      and passed over: the ears and tail carry AUTHORED motion
+                      (flare, wag, the air tuck) on the same bones a solver
+                      would own, and the spring was already there — it was only
+                      missing an input.
+                      clearCoat.js = swaps standard materials for physical ones
+                      and drives their clearcoat. RIDER ONLY: Player.jsx wraps
+                      <Rider /> in the group it hands to applyClearCoat, so the
+                      dog keeps its MeshStandardMaterial — a coated dog reads as
+                      wet plastic, not fur. Player.jsx owns the leva folder
+                      ("Clear coat") because two useControls on the same path
+                      is a duplicate-key clash
                       ToonFX.jsx = leva-driven toon try-out passes (posterize,
                       depth outline, halftone, pixelate, tilt shift), all OFF by
                       default so the shoot harness and acceptance targets are
@@ -330,6 +455,7 @@ node src/game/player/scoring.check.js      # live grind payout + combo multiplie
 node src/game/player/boneRig.check.js      # rider joint angles, in world space
 node src/game/components/shadowfit.check.js
 node src/game/components/clearCoat.check.js   # standard -> physical material swap
+node src/game/components/recolor.check.js     # rider shirt hue rotation
 ```
 
 `boneRig.check.js` rebuilds boy.glb's skeleton straight out of the glTF node

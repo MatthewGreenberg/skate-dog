@@ -1,5 +1,5 @@
 // The kid riding the dachshund: public/boy.glb, posed every frame by the same
-// authored pose table the procedural rider used. Feet sit at Dog's BACK_Y
+// authored pose table the procedural rider used. Feet sit at Dog's backY()
 // (measured off the dachshund's fitted bind pose), forward is +Z. No clips ship
 // in the file — every angle below is hand-authored and damped, so the rider
 // still reacts to the sim rather than playing back a loop.
@@ -14,7 +14,8 @@ import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { P } from '../store.js'
 import { buildRig, setBone, eulerDelta, armDelta, elbowDelta } from '../player/boneRig.js'
-import { BACK_Y } from './Dog.jsx'
+import { backY } from './dogFit.js'
+import { hueShift } from './recolor.js'
 
 const URL = '/boy.glb'
 // Draco-compressed (34MB -> 4.1MB), decoder served locally like the dog's.
@@ -25,13 +26,23 @@ useGLTF.preload(URL, DRACO_PATH)
 // in this same parent, so nothing rescales. Limb lengths come off the bind pose
 // (buildRig) rather than being typed in here.
 const PELVIS_FREE = 0.3 // pelvis height when the legs are not carrying weight
+// The soles bite into the coat rather than resting on top of it — standing at
+// backY() exactly reads as standing *beside* the dog at this size.
+const SINK = 0.035
 
 // hip/knee: positive swings the limb backward (-Z). a?r: outward raise (0 = arm
 // down, 1.57 = level). a?s: forward/back swing. a?e: elbow, negative folds the
 // forearm forward. plant: how much the feet carry weight. gait: how much the
 // dog's run cycle shows in the arms.
 const POSES = {
-  ride:  { hipL: -0.36, kneeL: 0.30, hipR: 0.26, kneeR: 0.20, aLr: 1.42, aLs: -0.26, aLe: -0.30, aRr: 1.42, aRs: -0.26, aRe: -0.30, torso: 0.10, plant: 1, gait: 1, duck: 0 },
+  // Knees carry a permanent bend: at this dog size a straight-legged stance
+  // reads as standing next to it. The two legs must DROP the same amount —
+  // body.position.y takes the mean of the two, so any difference floats one
+  // foot and buries the other. Cos is what does the dropping, so the angles are
+  // mirrored across the pair (front: thigh 0.68 fwd / shin 0.42 back, rear the
+  // other way round) rather than the pose being mirrored: ~0.85 of the leg's
+  // length, a 4cm crouch on a 1.0-tall boy, with the drops within 5mm.
+  ride:  { hipL: -0.68, kneeL: 1.10, hipR: 0.42, kneeR: 0.26, aLr: 1.42, aLs: -0.26, aLe: -0.30, aRr: 1.42, aRs: -0.26, aRe: -0.30, torso: 0.24, plant: 1, gait: 1, duck: 0 },
   tuck:  { hipL: -0.78, kneeL: 0.80, hipR: 0.62, kneeR: 0.58, aLr: 0.42, aLs: -0.55, aLe: -1.15, aRr: 0.42, aRs: -0.55, aRe: -1.15, torso: 0.34, plant: 1, gait: 0.3, duck: 0 },
   air:   { hipL: -1.15, kneeL: 1.25, hipR: -0.55, kneeR: 1.40, aLr: 2.45, aLs: -0.14, aLe: -0.18, aRr: 2.45, aRs: 0.08, aRe: -0.18, torso: -0.14, plant: 0, gait: 0, duck: 0 },
   // grab_* poses pair with Dog.jsx's GRABS table (same style keys); a fresh
@@ -71,6 +82,43 @@ const KEYS = Object.keys(POSES.ride)
 
 const _d = new THREE.Quaternion() // the only delta the frame loop allocates: none
 
+// The boy ships orange-on-orange with the dog he rides and the warm plaza he
+// rides it on, so the whole player unit read as one blob. Every garment is its
+// own texture, named by the GLB, so the fix is per-map hue rotation. His shorts
+// are already blue and left alone. Measured off the maps: the orange sits at
+// hue 25, the trim and laces are below the chroma floor and never move.
+const SHIFTS = [
+  // +168 lands the shirt and both sleeves in teal, the plaza's complement, and
+  // flips the shirt's blue trim to a warm cream.
+  [/shirt|sleeve/, 168],
+  // -28 is 25 -> 357: a saturated red at the same lightness, not a red-orange.
+  [/shoe/, -28],
+]
+const shiftFor = (name) => SHIFTS.find(([re]) => re.test(name))?.[1] || 0
+
+function recolorMap(mat, deg) {
+  const img = mat.map?.image
+  if (!img || mat.userData.recolored) return
+  mat.userData.recolored = true
+  const cv = document.createElement('canvas')
+  cv.width = img.width
+  cv.height = img.height
+  const ctx = cv.getContext('2d', { willReadFrequently: false })
+  ctx.drawImage(img, 0, 0)
+  const buf = ctx.getImageData(0, 0, cv.width, cv.height)
+  hueShift(buf.data, deg)
+  ctx.putImageData(buf, 0, 0)
+  const tex = new THREE.CanvasTexture(cv)
+  // CanvasTexture defaults flipY true; a glTF texture is false, and the pixels
+  // came straight off the source, so every sampler setting is inherited.
+  tex.flipY = mat.map.flipY
+  tex.colorSpace = mat.map.colorSpace
+  tex.wrapS = mat.map.wrapS
+  tex.wrapT = mat.map.wrapT
+  tex.anisotropy = mat.map.anisotropy
+  mat.map = tex
+}
+
 export default function Rider() {
   const root = useRef()
   const body = useRef()
@@ -86,6 +134,8 @@ export default function Rider() {
       // — but 0.5 roughness reads as vinyl next to the park's matte surfaces.
       o.material.roughness = 0.85
       o.material.metalness = 0
+      const deg = shiftFor(o.material.map?.name || '')
+      if (deg) recolorMap(o.material, deg)
     })
     return buildRig(scene)
   }, [scene])
@@ -111,7 +161,7 @@ export default function Rider() {
 
     // ---- root: lifts clear of the dog, leans into turns, folds on impact
     const rootPitch = P.stretch * 0.16 - P.crouch * 0.18
-    root.current.position.y = BACK_Y + P.riderLift * 0.3
+    root.current.position.y = backY() - SINK + P.riderLift * 0.3
     root.current.rotation.z = -P.lean * 0.24
     root.current.rotation.x = rootPitch
 
@@ -161,7 +211,7 @@ export default function Rider() {
   })
 
   return (
-    <group ref={root} position={[0, BACK_Y, 0]}>
+    <group ref={root} position={[0, backY(), 0]}>
       {/* body is the pelvis: the model hangs off it with its hip on the origin */}
       <group ref={body}>
         <primitive object={scene} position={rig.hip.clone().negate()} />

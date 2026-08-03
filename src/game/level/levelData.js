@@ -13,10 +13,17 @@ export const DECK = 1.6 // back-right raised deck
 export const PAD1 = 1.2 // mid-plaza raised pad
 export const PAD2 = 0.9 // south low deck
 export const HP_BASE = 0.35 // halfpipe platform height — must stay under STEP_UP (0.55)
+// Wall height above the platform, and the flat between the two low edges. At
+// DECK (1.6) over 4.6m of flat the pipe rode shallow and wide; 2.0 over a 2.4m
+// run puts the lip at 80deg (R = (run^2+h^2)/2h = 2.42, barely over the run —
+// h == run would be dead vertical and the arc degenerate), and the shorter flat
+// means less rolling between transitions.
+export const HP_H = 2.0
+const HP_FLAT = 3.2
 
 // The perimeter tree/shrub rings are ellipses that dip INSIDE the rectangular
 // play area at its corners — exactly where the halfpipe sits. Keep-out box.
-const HP_CLEAR = { minX: -31.5, maxX: -20.5, minZ: 18, maxZ: 31 }
+const HP_CLEAR = { minX: -33.5, maxX: -18.5, minZ: 18, maxZ: 31 }
 const inHpClear = (x, z) => x > HP_CLEAR.minX && x < HP_CLEAR.maxX && z > HP_CLEAR.minZ && z < HP_CLEAR.maxZ
 
 // ---------------------------------------------------------------- bowl
@@ -90,20 +97,22 @@ export const SOLIDS = [
   // it reads as a built wooden ramp. Approached from
   // behind, a quarter's footprint reads as a wall at its top height (rampTopAt
   // measures the nearest edge), which is what a halfpipe's back should do.
-  // All four boxes share the quarters' width (8) and style 'solid' so the
+  // All four boxes share the quarters' width (12) and style 'solid' so the
   // platform, transitions and top decks render flush in the same plywood —
   // at the old w:9 the masonry deck slabs stuck 0.5m past the ramp faces and
   // the whole structure read as a walled courtyard, not one U-shaped ramp.
-  box({ id: 'hpDeck', x: -26, z: 24.5, w: 8, d: 10.4, top: HP_BASE, style: 'solid' }),
-  ramp({ id: 'hpN', x: -26, z: 21, w: 8, d: 2.4, rot: Math.PI, y0: HP_BASE, y1: HP_BASE + DECK, curve: 'quarter', style: 'solid' }),
-  ramp({ id: 'hpS', x: -26, z: 28, w: 8, d: 2.4, rot: 0, y0: HP_BASE, y1: HP_BASE + DECK, curve: 'quarter', style: 'solid' }),
+  // z geometry hangs off the centre (24.5): half-flat 1.6, then a 2.4 run, then
+  // a 1.4 deck — the platform spans the lot.
+  box({ id: 'hpDeck', x: -26, z: 24.5, w: 12, d: HP_FLAT + 2 * (2.4 + 1.4), top: HP_BASE, style: 'solid' }),
+  ramp({ id: 'hpN', x: -26, z: 24.5 - HP_FLAT / 2 - 1.2, w: 12, d: 2.4, rot: Math.PI, y0: HP_BASE, y1: HP_BASE + HP_H, curve: 'quarter', style: 'solid' }),
+  ramp({ id: 'hpS', x: -26, z: 24.5 + HP_FLAT / 2 + 1.2, w: 12, d: 2.4, rot: 0, y0: HP_BASE, y1: HP_BASE + HP_H, curve: 'quarter', style: 'solid' }),
   // Top decks behind the coping, like a real vert ramp. Without them the
   // quarter is zero-thickness at its lip, and a dog CRESTING slowly straddles
   // the top with half its body printed out the back face — a lift can't fix
   // "the surface ends here". The ramp collider's 1m top overhang hands off to
   // these seamlessly; qp1 never had the problem because deckA is its deck.
-  box({ id: 'hpDeckN', x: -26, z: 19.1, w: 8, d: 1.4, top: HP_BASE + DECK, style: 'solid' }),
-  box({ id: 'hpDeckS', x: -26, z: 29.9, w: 8, d: 1.4, top: HP_BASE + DECK, style: 'solid' }),
+  box({ id: 'hpDeckN', x: -26, z: 24.5 - HP_FLAT / 2 - 2.4 - 0.7, w: 12, d: 1.4, top: HP_BASE + HP_H, style: 'solid' }),
+  box({ id: 'hpDeckS', x: -26, z: 24.5 + HP_FLAT / 2 + 2.4 + 0.7, w: 12, d: 1.4, top: HP_BASE + HP_H, style: 'solid' }),
 
   // ---- stairs -----------------------------------------------------------
   stair({ id: 'stairA', x: 0.5, z: 13, w: 5.4, d: 5, rot: -Math.PI / 2, y0: 0, y1: PAD1, steps: 6 }),
@@ -138,11 +147,16 @@ function arcWall(cx, cz, r, a0, a1, n, h, muralAt) {
 export const WALLS = [
   // deck A: west retaining wall, north + east perimeter
   wall({ x: 5.4, z: -22, w: 1.2, d: 20, h: DECK + 0.7, mural: 'flower' }),
-  wall({ x: 20, z: -32.6, w: 28, d: 1.2, h: DECK + 0.7 }),
-  wall({ x: 34.6, z: -22, w: 1.2, d: 20, h: DECK + 0.7, mural: 'rainbow' }),
+  // North and east run all the way OUT to the kerb (masonry inner face ~±35.9
+  // / ~36.9, Skatepark's Kerb) instead of stopping 1.2 thick. At 1.2 they left
+  // a 1.6m blind alley between their outer face and the kerb, wrapping the NE
+  // corner as an L — a tight nothing-space you could roll into and get stuck.
+  // Inner faces are unmoved (z -32, x 34), so nothing inside the park changes.
+  wall({ x: 21.5, z: -33.5, w: 31, d: 3, h: DECK + 0.7 }),
+  wall({ x: 35.5, z: -22, w: 3, d: 20, h: DECK + 0.7, mural: 'rainbow' }),
   // deck B
   wall({ x: 25.4, z: -8, w: 1.2, d: 8, h: DECK + 0.7, mural: 'flower' }),
-  wall({ x: 34.6, z: -6, w: 1.2, d: 12, h: DECK + 0.7 }),
+  wall({ x: 35.5, z: -6, w: 3, d: 12, h: DECK + 0.7 }),
   wall({ x: 26.2, z: 1.4, w: 1.2, d: 4.4, base: 0, h: DECK + 0.55 }),
   wall({ x: 31.8, z: 1.4, w: 1.2, d: 4.4, base: 0, h: DECK + 0.55 }),
   // deck A front-edge dividers between the transitions
@@ -169,7 +183,11 @@ export const WALLS = [
 
 // ---------------------------------------------------------------- planters
 export const PLANTERS = [
-  { x: -26, z: 8, w: 6, d: 4, h: 0.95, plant: 'tree' },
+  // The two beds that used to sit at (-26,8) and (-34,16) are gone: they stood
+  // squarely in the only run-in to the halfpipe, so every approach was a slalom
+  // between them. Their greenery moved to (-35.5,24.5) — alongside the pipe,
+  // against the west kerb, out of the lane.
+  { x: -35.5, z: 24.5, w: 3, d: 6, h: 0.95, plant: 'tree' },
   { x: -29, z: -22, w: 5, d: 6, h: 0.95, plant: 'tree' },
   { x: -4, z: -25, w: 6, d: 4, h: 0.95, plant: 'tree' },
   { x: 9, z: -28, w: 5, d: 4, base: DECK, h: 0.95, plant: 'tree' },
@@ -181,7 +199,6 @@ export const PLANTERS = [
   { x: 15.5, z: 21.5, w: 5, d: 3.4, h: 0.95, plant: 'flowers' },
   { x: -24, z: -30, w: 6, d: 4, h: 0.95, plant: 'tree' },
   { x: 21.5, z: -14.6, w: 3, d: 2.6, base: DECK, h: 0.95, plant: 'flowers' },
-  { x: -34, z: 16, w: 5, d: 6, h: 0.95, plant: 'tree' },
 ]
 
 // perimeter landscaping band; also the play-area clamp
@@ -254,7 +271,7 @@ export const LAMPS = [
   { x: 3.5, z: -17.5, banner: 'flower' },
   { x: 24, z: -30, base: DECK, banner: null },
   { x: 36, z: -2, banner: 'skate' },
-  { x: -19.5, z: 24, banner: 'flower' },
+  { x: -18.5, z: 24, banner: 'flower' },
   { x: 13.5, z: 18, banner: null },
   { x: 33.5, z: -19, base: DECK, banner: null },
   { x: 0, z: 32, banner: 'flower' },
@@ -339,9 +356,12 @@ export const BONES = [
   // coping ollie. Sits a hair inside the coping because launchOffLip drifts
   // the air back over the transition.
   { id: 'qp1Air', x: 18, y: 5.0, z: -11.5 },
-  // halfpipe: a pumped air over the north lip (lip 1.95; deck ollie alone tops
-  // out ~3.7 on the centre, so it wants wall-to-wall speed)
-  { id: 'pipeAir', x: -26, y: 3.75, z: 20.1 },
+  // halfpipe: a pumped air over hpN's lip. The lip is at z 20.5 (ramp centre
+  // 21.7 - d/2), and z 21.9 put this 1.4m INSIDE the arc — an air off the
+  // coping arcs over the lip and drops back down near it, so nothing that
+  // launched off the wall ever reached that far in. Sits 0.5m inside like
+  // qp1Air, for the same launchOffLip drift. Lip top is 2.35 (HP_BASE + HP_H).
+  { id: 'pipeAir', x: -26, y: 3.9, z: 21.0 },
   // mid-grind on r1 — 1.6 clears the rolling body centre (1.55 max at radius)
   // but a grind (centre ~1.03) or a timed flat ollie takes it
   { id: 'railMid', x: 11, y: 1.6, z: -4 },
@@ -349,6 +369,29 @@ export const BONES = [
   { id: 'bowlAir', x: -17.5, y: 1.6, z: -0.35 },
   // the stairA gap — ollie off pad1's top edge and float the whole stair set
   { id: 'stairGap', x: 1.5, y: 2.5, z: 13 },
+]
+
+// ---------------------------------------------------------------- letters
+// D-O-G, the S-K-A-T-E letters. Same float band and reachability rules as the
+// bones (bones.check.js measures both), but parked on the three transitions the
+// bones DON'T use, so spelling the word walks you round the park rather than
+// round one feature: bank4 onto pad2, the ledge1 grind line, bank2 onto deckB.
+export const LETTERS = [
+  { id: 'D', ch: 'D', x: -3.5, y: 2.4, z: 23.5 },
+  { id: 'O', ch: 'O', x: 5.5, y: 1.7, z: 5 },
+  { id: 'G', ch: 'G', x: 27, y: 3.2, z: -2.4 },
+]
+
+// ---------------------------------------------------------------- trash cans
+// Five smashables, on lines rather than in corners: you should hit these while
+// going somewhere, not detour to them. They are NOT colliders (see Cans.jsx) —
+// you ride straight through and they burst.
+export const CANS = [
+  { id: 'can0', x: -8, z: 2 }, // west plaza, on the roll-out from the bowl
+  { id: 'can1', x: 14, z: 12 }, // east plaza open run
+  { id: 'can2', x: 24, z: -17.5 }, // deckA, past ledge4
+  { id: 'can3', x: -2, z: -14 }, // north plaza, in front of the mural wall
+  { id: 'can4', x: 2, z: 26 }, // pad2, the bank4/bank5 landing
 ]
 
 export const SPAWN = { x: 0, z: 6, heading: -0.4 }

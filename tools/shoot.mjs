@@ -25,7 +25,7 @@ const HOST = '127.0.0.1'
 const OUT = path.join(ROOT, 'shots')
 const W = 1600
 const H = 1000
-const ALL = ['plaza', 'bowl', 'hero', 'props', 'grove', 'deck', 'pipe']
+const ALL = ['plaza', 'bowl', 'hero', 'props', 'grove', 'deck', 'pipe', 'bench']
 
 const argv = process.argv.slice(2)
 let tag = ''

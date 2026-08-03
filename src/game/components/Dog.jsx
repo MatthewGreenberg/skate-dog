@@ -221,7 +221,7 @@ export default function Dog() {
     return { scale: TARGET_LENGTH / _size.x, minY: _box.min.y }
   }, [scene])
 
-  const a = useRef({ tuck: 0, splay: 0, tilt: 0, wag: 0, lag: 0, fore: 0, ez: [0, 0], ezv: [0, 0] })
+  const a = useRef({ tuck: 0, splay: 0, tilt: 0, wag: 0, wob: 0, lag: 0, fore: 0, ez: [0, 0], ezv: [0, 0] })
   const tongue = useRef()
   const mouth = useRef()
   const fit = useRef()
@@ -284,13 +284,20 @@ export default function Dog() {
     const cycle = P.runBlend * (1 - s.tuck) * (1 - s.splay)
     const bob = Math.sin(P.run * 2) * 0.016 * cycle
 
+    // grind balance wobble: riding a 5cm rail is never settled. Two detuned
+    // sines so it reads as correcting, not as a metronome, and it rides s.splay
+    // — the grind blend that is already damped in and out, so it never pops.
+    s.wob += 7.3 * dt
+    const wob = s.splay * (Math.sin(s.wob) * 0.09 + Math.sin(s.wob * 1.7) * 0.04)
+
     const r = root.current
     // grab: the dog is pulled toward the reaching hand — connection over
     // separation, one unit in the air. Which way depends on the rolled style.
     const gb = GRABS[P.grabStyle] || GRABS.nose
     r.rotation.x = P.dogPitch + P.grab * gb.pitch
-    r.rotation.y = Math.sin(P.run) * 0.05 * cycle
-    r.rotation.z = P.dogRoll + P.lean * 0.22 + Math.sin(P.run) * 0.035 * cycle + P.grab * gb.roll
+    r.rotation.y = Math.sin(P.run) * 0.05 * cycle + wob * 0.25
+    r.rotation.z =
+      P.dogRoll + P.lean * 0.22 + Math.sin(P.run) * 0.035 * cycle + P.grab * gb.roll + wob
     r.position.x = P.grab * gb.x
     r.position.y = bob - P.crouch * 0.06 + P.grab * gb.y
     // squash and stretch, volume-ish: the gait pumps it too, so the body is

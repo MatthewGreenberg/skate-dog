@@ -7,11 +7,25 @@ import { TOUCH } from './input.js'
  * UI-facing state only. Anything that changes every frame lives on `P` below
  * so it never triggers a React render.
  */
+// Seconds on the clock at the start of a run. Short on purpose: the run is
+// EXTENDED by playing (see TIME_BONUS / TIME_BAIL), so a long base clock would
+// make every challenge urgency-free.
+export const RUN_TIME = 120
+export const TIME_BONUS = 15 // per bone and per challenge
+export const TIME_BAIL = -5 // time is the only resource — there are no lives
+
 export const useGame = create((set, get) => ({
   score: 0,
-  lives: 3,
   combo: 0,
   bones: 0, // floating bones collected (of levelData BONES)
+  // Whole seconds only. The live clock is P.timeLeft; GameLoop mirrors it here
+  // when the displayed second changes, so the HUD renders ~1Hz, not 120Hz.
+  timeLeft: RUN_TIME,
+  runOver: false,
+  goalsDone: [], // ids from goals.js GOALS
+  // Bumped by restart(). Keys the collectible components, whose collected flags
+  // live in useRefs with no reset path — a remount IS the reset.
+  runId: 0,
   trickText: '',
   trickPoints: 0,
   trickLive: false, // trick still in progress — the popup holds instead of fading
@@ -30,7 +44,32 @@ export const useGame = create((set, get) => ({
   clearTrick: () => set({ trickText: '', trickPoints: 0, trickLive: false }),
   setCombo: (combo) => set({ combo }),
   collectBone: () => set({ bones: get().bones + 1 }),
-  loseLife: () => set({ lives: Math.max(0, get().lives - 1) }),
+
+  // ---------------------------------------------------------------- the run
+  setTimeLeft: (timeLeft) => set({ timeLeft }),
+  // Writes through to P as well as the store: P is the clock the loop ticks,
+  // and a bonus that only landed in the store would be erased next frame.
+  addTime: (s) => {
+    P.timeLeft = Math.max(0, P.timeLeft + s)
+    set({ timeLeft: Math.ceil(P.timeLeft) })
+  },
+  markGoal: (id) => set({ goalsDone: [...get().goalsDone, id] }),
+  endRun: () => set({ runOver: true }),
+  restart: () => {
+    P.timeLeft = RUN_TIME
+    set((s) => ({
+      score: 0,
+      combo: 0,
+      bones: 0,
+      timeLeft: RUN_TIME,
+      runOver: false,
+      goalsDone: [],
+      runId: s.runId + 1,
+      trickText: '',
+      trickPoints: 0,
+      trickLive: false,
+    }))
+  },
 }))
 
 /**
@@ -77,6 +116,8 @@ export const P = {
   // CameraController blends the two poses with it and Intro.jsx flies the
   // troika title out on the same clock, so there is one timeline, not three.
   intro: 1,
+  // the live run clock. useGame.timeLeft is a whole-second mirror of this.
+  timeLeft: RUN_TIME,
   throttle: 0,
   steer: 0,
   braking: false,
@@ -109,3 +150,4 @@ export function emit(name, payload) {
 //   'trick'  { name:string, points:number }
 //   'bail'   { pos:Vector3 }
 //   'bone'   { pos:Vector3, big:boolean }  collectible grabbed (big = last one)
+//   'goal'   { pos:Vector3, id:string }    challenge completed (goals.js)

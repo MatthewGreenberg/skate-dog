@@ -58,6 +58,95 @@
   100% { transform: scale(1); }
 }
 
+/* The run clock, top centre — the one number you check without looking away
+   from the dog, so it sits on the axis your eye is already on. */
+.hud-time {
+  top: var(--edge);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 calc(var(--u) * 1.3);
+}
+/* .hud-pill.pop is a bare scale() and would drop the centring transform, so
+   the clock gets its own keyframes with the translate baked in. */
+.hud-time.pop {
+  animation: hudTimePop 0.34s cubic-bezier(0.34, 1.56, 0.5, 1);
+}
+@keyframes hudTimePop {
+  0% { transform: translateX(-50%) scale(1); }
+  38% { transform: translateX(-50%) scale(1.14); }
+  100% { transform: translateX(-50%) scale(1); }
+}
+.hud-time .hud-score-value {
+  font-size: calc(var(--u) * 2.2);
+}
+.hud-time.is-urgent {
+  background: linear-gradient(rgba(196, 54, 92, 0.72), rgba(140, 26, 66, 0.78));
+  animation: hudTimeUrgent 1s ease-in-out infinite;
+}
+@keyframes hudTimeUrgent {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.05); }
+}
+
+/* ------------------------------------------------------------ goal card */
+.hud-goals {
+  position: absolute;
+  top: calc(var(--edge) + var(--u) * 4.6);
+  left: var(--edge);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.22);
+}
+.hud-goal {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 0.42);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: calc(var(--u) * 0.86);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 4px var(--ink);
+  transition: color 0.3s ease, opacity 0.3s ease;
+}
+.hud-goal i {
+  flex: none;
+  width: calc(var(--u) * 0.62);
+  height: calc(var(--u) * 0.62);
+  border-radius: 50%;
+  border: var(--rim) solid rgba(255, 255, 255, 0.75);
+  transform: translateY(calc(var(--u) * -0.06));
+}
+.hud-goal span {
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 600;
+  opacity: 0.62;
+}
+.hud-goal.is-got {
+  color: #ffe14d;
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 225, 77, 0.6);
+  animation: hudGoalGot 0.45s cubic-bezier(0.34, 1.56, 0.5, 1);
+}
+.hud-goal.is-got i {
+  background: #ffe14d;
+  border-color: #ffe14d;
+  box-shadow: 0 0 calc(var(--u) * 0.6) rgba(255, 225, 77, 0.8);
+}
+.hud-goal.is-got span {
+  opacity: 0;
+}
+@keyframes hudGoalGot {
+  0% { transform: translateX(0); }
+  35% { transform: translateX(calc(var(--u) * 0.5)); }
+  100% { transform: translateX(0); }
+}
+/* On a phone the card is a scoreboard, not a to-do list — you can't read ten
+   hints while steering, and they'd sit under your thumb. */
+@media (pointer: coarse) {
+  .hud-goal span { display: none; }
+  .hud-goal { font-size: calc(var(--u) * 0.78); }
+}
+
 .hud-bone {
   flex: none;
   width: calc(var(--u) * 2.4);
@@ -140,6 +229,13 @@
   padding: var(--edge);
   text-align: center;
   background: radial-gradient(120% 100% at 50% 38%, #ffd9b4, #6f42a4);
+}
+.hud-load-label {
+  color: #fff;
+  font-size: calc(var(--u) * 1.4);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-shadow: 0 2px 5px var(--ink);
 }
 .hud-load-bar {
   position: relative;
@@ -253,6 +349,62 @@
 }
 .hud-play:active {
   transform: translateY(1px) scale(0.98);
+}
+
+/* ------------------------------------------------------------ scorecard */
+/* Centred, unlike the start card: there is no troika title to keep clear once
+   the run is over, and the final score is the thing to look at. */
+.hud-over {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 0.6);
+  text-align: center;
+  background: radial-gradient(ellipse at center, rgba(70, 36, 122, 0.55), rgba(46, 20, 84, 0.86));
+  animation: hudFade 0.5s ease-out;
+}
+.hud-over.is-out {
+  animation: hudStartOut 0.2s ease-in forwards;
+}
+.hud-over-title {
+  color: #fff;
+  font-size: calc(var(--u) * 2.1);
+  font-weight: 900;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  opacity: 0.8;
+  text-shadow: 0 3px 8px var(--ink);
+}
+.hud-over-score {
+  color: #ffe14d;
+  font-size: calc(var(--u) * 6);
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 calc(var(--u) * 0.25) calc(var(--u) * 0.9) rgba(40, 14, 70, 0.6);
+}
+.hud-over-rows {
+  display: flex;
+  gap: calc(var(--u) * 1.6);
+  margin-bottom: calc(var(--u) * 0.8);
+}
+.hud-over-rows > div {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 0.4);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: calc(var(--u) * 0.95);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.hud-over-rows b {
+  color: #fff;
+  font-size: calc(var(--u) * 1.6);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ------------------------------------------------------------ touch */

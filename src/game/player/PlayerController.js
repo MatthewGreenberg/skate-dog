@@ -3,7 +3,7 @@
 // following and ramp launches all fall out of the same integration.
 
 import * as THREE from 'three'
-import { P, useGame, emit } from '../store.js'
+import { P, useGame, emit, TIME_BAIL } from '../store.js'
 import { input, consumeJump, applyTouchStick, TOUCH } from '../input.js'
 import { sampleSurface, resolveCollision } from '../level/colliders.js'
 import { findGrind, railAt, PATHS } from '../level/rails.js'
@@ -22,6 +22,9 @@ const SPEED_K = TOUCH ? 0.7 : 1
 const MAX_SPEED = 13 * SPEED_K
 const ACCEL = 13 * SPEED_K
 const REVERSE_ACCEL = 5
+// Transition pump, as a multiplier on ACCEL per unit of surface curvature
+// (a 1.6m/2.4m quarter is 0.385, so this peaks near 1.2x ACCEL at low speed).
+const PUMP = 3.2
 const BRAKE = 18
 const ROLL_DRAG = 0.32
 const OVERSPEED_DRAG = 0.55
@@ -39,6 +42,11 @@ const TURN_HIGH = 3.1
 // already decays as you cross, so the boost fades on its own with no timer.
 const SHIFT_TURN = 1.6
 const SHIFT_GRIP = 1.2
+// Fall-line assist rate on a transition (1/s) — ~0.2s to square up, hands off.
+const ALIGN = 5
+// How long that axis survives after the last transition. The halfpipe's flat is
+// 3.2m — under 0.4s at any speed worth riding — so the guide carries across it.
+const PIPE_HOLD = 0.9
 
 const JUMP_V = 7.6
 // Clean-landing reward: land square with the flip ridden out and you keep MORE
@@ -102,6 +110,7 @@ const trick = {
   grindBank: 0,
   bigAir: false, // 'bigair' already emitted this air
   overPool: false, // crossed the bowl's interior during this air
+  leftPool: false, // ...having been clear of the rim first — see stepAir
 
   grindShown: 0, // multiplied points already added to the score this grind
   grindFlush: 0,
@@ -118,6 +127,8 @@ let acc = 0
 let coyote = 0
 let grindLock = 0
 let spinResidual = 0
+let pipeAxis = 0 // fall line of the last transition ridden, for the assist above
+let pipeHold = 0
 const lastSafe = { x: SPAWN.x, z: SPAWN.z, y: 0, heading: SPAWN.heading }
 
 export function resetPlayer() {
@@ -130,6 +141,7 @@ export function resetPlayer() {
   P.dogPitch = 0
   P.riderLift = 0
   P.grindRail = null
+  pipeHold = 0 // a stale transition axis would steer the next run/respawn
 }
 
 const damp = (cur, target, lambda, dt) => cur + (target - cur) * (1 - Math.exp(-lambda * dt))
@@ -187,6 +199,37 @@ function stepGround(dt) {
   const turn = TURN_LOW + (TURN_HIGH - TURN_LOW) * Math.min(1, sp / MAX_SPEED)
   P.heading -= input.steer * turn * (1 + SHIFT_TURN * shift) * dt
 
+  // Transition assist. On a wall, a couple of degrees of heading error is metres
+  // of sideways drift by the time you reach the lip — you leave the pipe out the
+  // side instead of over the coping, which is what makes a halfpipe feel
+  // impossible to hold. With NO steer input on a steep surface the heading eases
+  // onto the fall line (up or down the wall, whichever it is already nearer), so
+  // hands-off means square. Any steer input switches it straight off, so it
+  // assists the line you are not correcting rather than fighting the one you are.
+  // It has to survive the FLAT too, or the assist ends at the bottom of every
+  // wall and the run across to the other one is where you drift out the side.
+  // A transition sets the axis (its fall line) and a hold timer; the flat
+  // between two facing quarters is crossed in well under that, so the pipe
+  // guides end to end while an ordinary bank stops guiding you a moment after
+  // you roll off it.
+  const nl = Math.hypot(n.x, n.z)
+  if (surf.curv > 0.02 && nl > 1e-3) {
+    pipeAxis = Math.atan2(n.x / nl, n.z / nl)
+    pipeHold = PIPE_HOLD
+  } else if (pipeHold > 0) pipeHold -= dt
+  // Driven off the HOLD only, so it is a quarter-pipe assist and nothing else:
+  // surf.curv is 0 in the bowl (colliders.js only computes it for a quarter),
+  // and a bowl wants carving lines, not a fall line. Guiding there also made the
+  // 3s trajectories chaotic enough to break collision.check.js's dt agreement.
+  if (input.steer === 0 && pipeHold > 0) {
+    const guide = pipeAxis
+    // nearest of the axis and its reverse — riding up and rolling back down are
+    // both square, and snapping to one of them would flip you every crossing
+    const err = wrapPi(guide - P.heading)
+    const want = Math.abs(err) > Math.PI / 2 ? wrapPi(err - Math.sign(err) * Math.PI) : err
+    P.heading += want * (1 - Math.exp(-ALIGN * dt))
+  }
+
   // forward, projected onto the surface
   f.set(Math.sin(P.heading), 0, Math.cos(P.heading))
   f.addScaledVector(n, -f.dot(n))
@@ -200,6 +243,22 @@ function stepGround(dt) {
   const pushK = Math.max(0.15, n.y) // NB: `push` is the module-scope wall-normal scratch
   if (input.throttle > 0) P.vel.addScaledVector(f, ACCEL * pushK * input.throttle * dt)
   else if (input.reverse) P.vel.addScaledVector(f, -REVERSE_ACCEL * pushK * dt)
+
+  // Pump. Throttle can't drive you on a transition (pushK -> 0.15 on a
+  // near-vertical wall, by design — free thrust up a wall threw you 3m over the
+  // coping), so a halfpipe session bled out wall to wall: every crossing paid
+  // ROLL_DRAG and got nothing back. It is NOT on the throttle: a pump is what
+  // riding a transition IS, and holding a button through every wall is exactly
+  // the busywork this replaces. Gated on surf.curv (1/R, nonzero only on a
+  // quarter's arc) and applied along the direction of TRAVEL, not the facing —
+  // rolling back down fakie, a facing-aligned push is a brake. It fades to zero
+  // at MAX_SPEED, so it tops the session up rather than winding it up without
+  // limit, and the brake still beats it.
+  if (surf.curv > 0.02) {
+    const pump = PUMP * surf.curv * Math.max(0, 1 - sp / MAX_SPEED)
+    const dir = P.vel.dot(f) < -0.5 ? -1 : 1
+    P.vel.addScaledVector(f, ACCEL * pump * dir * dt)
+  }
 
   // gravity along the surface — this is what builds speed in the bowl
   tmp.copy(n).multiplyScalar(G * n.y)
@@ -438,6 +497,7 @@ function takeoff(fromJump) {
   trick.grabbing = false // each air rolls a fresh grab style
   trick.bigAir = false
   trick.overPool = false
+  trick.leftPool = false
   if (!fromJump) {
     trick.spinTotal = 0
     trick.dogSpins = 0
@@ -479,7 +539,13 @@ function poolK(x, z) {
 function stepAir(dt) {
   P.airTime += dt
   trick.air += dt
-  if (!trick.overPool && poolK(P.pos.x, P.pos.z) < 0.7) trick.overPool = true
+  // Pool gap arms only if the air was OUTSIDE the rim first. Popping straight
+  // up off the bowl's flat bottom starts at k<0.7, so testing k alone paid the
+  // gap for an ollie out of the pool onto the deck — the one line that has to
+  // be flown is rim-to-rim ACROSS the hole.
+  const k = poolK(P.pos.x, P.pos.z)
+  if (k > 1) trick.leftPool = true
+  if (trick.leftPool && !trick.overPool && k < 0.7) trick.overPool = true
   if (!trick.bigAir && trick.air > BIG_AIR) {
     trick.bigAir = true
     emit('bigair', { pos: P.pos })
@@ -598,11 +664,22 @@ function land(s) {
   // dies against one wall. Face the way you are actually moving; the offset
   // goes into spinResidual so the dog visibly swings through the 180 instead
   // of snapping. Flat ground is untouched — fakie stays a thing there.
+  // It must not undo a 180 you MEANT: landing already facing the roll-out while
+  // the velocity is still carrying up the wall passed the old velocity-only test
+  // and spun you straight back into the wall. So the gate is the FALL LINE — the
+  // turn only fires when you are facing UPHILL, and it aims at downhill rather
+  // than at the current velocity (which is mid-transition and points wherever
+  // the arc had you). Landing facing uphill while still moving uphill is a
+  // deliberate hop up a bank, so vdotf still guards that.
   const vdotf = P.vel.x * Math.sin(P.heading) + P.vel.z * Math.cos(P.heading)
-  if (s.slope > 0.35 && vdotf < -0.5) {
-    const want = Math.atan2(P.vel.x, P.vel.z)
-    spinResidual += wrapPi(P.heading - want)
-    P.heading = want
+  const nl = Math.hypot(s.nx, s.nz)
+  if (s.slope > 0.35 && vdotf < -0.5 && nl > 1e-3) {
+    const down = Math.atan2(s.nx / nl, s.nz / nl)
+    const err = wrapPi(down - P.heading)
+    if (Math.abs(err) > Math.PI / 2) {
+      spinResidual -= err
+      P.heading = down
+    }
   }
 
   // clean landing: square to your line (within ~20deg of a whole spin) and the
@@ -741,10 +818,12 @@ function bail() {
   P.riderPose = 'bail'
   P.respawnTimer = 1.25
   P.vel.set(P.vel.x * 0.3, 2.5, P.vel.z * 0.3)
-  useGame.getState().loseLife()
+  // Time is the only resource in a run: a bail costs seconds off the clock.
+  // (There used to be a `lives` counter here that was never displayed and
+  // silently reset itself to 3 at zero, i.e. it did nothing at all.)
+  useGame.getState().addTime(TIME_BAIL)
   // the live tape is showing points that just stopped being real — say so
   useGame.getState().showTrick('Bail!', 0)
-  if (useGame.getState().lives <= 0) useGame.setState({ lives: 3 })
   trick.combo = 0
   useGame.getState().setCombo(0)
   emit('bail', { pos: P.pos })
@@ -830,6 +909,7 @@ function scoreAir() {
   trick.air = 0
   trick.bigAir = false
   trick.overPool = false
+  trick.leftPool = false
   // pts can only be 0 here if the live tape never showed anything either —
   // except a Pool Gap flown and then landed back IN the bowl, which is why the
   // settle is unconditional.

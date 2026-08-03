@@ -10,6 +10,7 @@ import { P, useGame } from '../store.js'
 import { LIGHT } from '../palette.js'
 import { initInput, sampleInput, TOUCH } from '../input.js'
 import { updatePlayer } from '../player/PlayerController.js'
+import { initGoals, tickGoals } from '../goals.js'
 import { startAudio, updateAudio } from '../audio/AudioManager.js'
 import { PHOTO, tickPhotoReady } from '../photo.js'
 
@@ -18,6 +19,8 @@ import Skatepark from './Skatepark.jsx'
 import Player from './Player.jsx'
 import Effects from './Effects.jsx'
 import Bones from './Bones.jsx'
+import Letters from './Letters.jsx'
+import Cans from './Cans.jsx'
 import CameraController from './CameraController.jsx'
 import PerformanceManager from './PerformanceManager.jsx'
 import GameUI from './GameUI.jsx'
@@ -30,6 +33,7 @@ import useToonFX from './ToonFX.jsx'
 function GameLoop() {
   const started = useGame((s) => s.started)
   useEffect(() => initInput(), [])
+  useEffect(() => initGoals(), [])
   useEffect(() => {
     if (!import.meta.env.DEV) return
     // dev diagnostics: inspect/park the player from the console
@@ -57,8 +61,20 @@ function GameLoop() {
     }
     const dt = Math.min(delta, 0.1)
     sampleInput(dt)
-    if (useGame.getState().started) {
+    const g = useGame.getState()
+    if (g.started) {
       if (P.intro > 0) P.intro = Math.max(0, P.intro - dt / REVEAL)
+      // The clock does not run during the reveal swoop — you can ride through
+      // it, but you shouldn't be billed for the 1.5s the camera spends flying.
+      if (!g.runOver && P.intro === 0) {
+        P.timeLeft = Math.max(0, P.timeLeft - dt)
+        tickGoals(dt)
+        // whole-second mirror: 1 HUD render per second, not one per frame
+        const sec = Math.ceil(P.timeLeft)
+        if (sec !== g.timeLeft) g.setTimeLeft(sec)
+        if (P.timeLeft === 0) g.endRun()
+      }
+      // the sim keeps running under the scorecard — the dog rolls to a stop
       updatePlayer(dt)
     }
     updateAudio(dt)
@@ -255,6 +271,9 @@ function PostFX() {
 }
 
 export default function Game() {
+  // Every collectible keeps its "already got" flags in a useRef with no reset
+  // path, so restarting a run is a remount — one key on the group they share.
+  const runId = useGame((s) => s.runId)
   return (
     <>
       <Leva hidden={!DEBUG} />
@@ -309,7 +328,11 @@ export default function Game() {
         <Lighting />
         <Skatepark />
         <Player />
-        <Bones />
+        <group key={runId}>
+          <Bones />
+          <Letters />
+          <Cans />
+        </group>
         <Intro />
         <Effects />
         <PostFX />

@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProgress } from '@react-three/drei'
 import { useGame } from '../store.js'
+import { GOALS, resetGoals } from '../goals.js'
+import { BONES } from '../level/levelData.js'
+import { resetPlayer } from '../player/PlayerController.js'
 import { touch, touchJumpDown, touchJumpUp, TOUCH } from '../input.js'
 import { unlockAudio, setMuted, isMuted } from '../audio/AudioManager.js'
 import { PHOTO } from '../photo.js'
@@ -74,7 +77,53 @@ function BonesPill() {
   return (
     <div className="hud-pill hud-bones" ref={ref}>
       <BoneIcon />
-      <span className="hud-score-value">{bones}/5</span>
+      <span className="hud-score-value">{bones}/{BONES.length}</span>
+    </div>
+  )
+}
+
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
+// The run clock. The store only holds whole seconds (GameLoop mirrors P.timeLeft
+// when the displayed second changes), so this re-renders ~1Hz — and every
+// re-render where the value went UP is a bonus, which is what `pop` marks.
+function TimePill() {
+  const timeLeft = useGame((s) => s.timeLeft)
+  const ref = useRef(null)
+  const prev = useRef(timeLeft)
+  useEffect(() => {
+    const up = timeLeft > prev.current
+    prev.current = timeLeft
+    if (!up || !ref.current) return
+    const el = ref.current
+    el.classList.remove('pop')
+    void el.offsetWidth
+    el.classList.add('pop')
+  }, [timeLeft])
+  return (
+    <div className={timeLeft <= 20 ? 'hud-pill hud-time is-urgent' : 'hud-pill hud-time'} ref={ref}>
+      <span className="hud-score-value">{mmss(timeLeft)}</span>
+    </div>
+  )
+}
+
+// The goal card. Ten rows is a lot of screen on a phone, so touch gets the
+// labels only once they're struck through — the list is a scoreboard there,
+// not a to-do list you can read while steering.
+function GoalList() {
+  const goalsDone = useGame((s) => s.goalsDone)
+  return (
+    <div className="hud-goals">
+      {GOALS.map((g) => {
+        const got = goalsDone.includes(g.id)
+        return (
+          <div className={got ? 'hud-goal is-got' : 'hud-goal'} key={g.id}>
+            <i />
+            <b>{g.label}</b>
+            <span>{g.hint}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -251,6 +300,7 @@ function LoadingScreen({ progress }) {
   const pct = Math.round(progress)
   return (
     <div className="hud-load">
+      <div className="hud-load-label">loading</div>
       <div className="hud-load-bar">
         <div className="hud-load-fill" style={{ width: `${pct}%` }} />
         <div className="hud-load-marker" style={{ left: `${pct}%` }}>
@@ -301,6 +351,55 @@ function StartOverlay() {
   )
 }
 
+// ---------------------------------------------------------------- scorecard
+function RunOver() {
+  const score = useGame((s) => s.score)
+  const bones = useGame((s) => s.bones)
+  const goalsDone = useGame((s) => s.goalsDone)
+  const [out, setOut] = useState(false)
+  const again = () => {
+    if (out) return
+    setOut(true)
+    // Three resets, and all three are load-bearing: the rig (P), the module
+    // state the goals keep outside React, and the store — whose runId bump
+    // remounts the collectibles.
+    resetPlayer()
+    resetGoals()
+    setTimeout(() => useGame.getState().restart(), 200)
+  }
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        again()
+      }
+    }
+    addEventListener('keydown', key)
+    return () => removeEventListener('keydown', key)
+  })
+  return (
+    <div className={out ? 'hud-over is-out' : 'hud-over'}>
+      <div className="hud-over-title">TIME</div>
+      <div className="hud-over-score">{NUM.format(score)}</div>
+      <div className="hud-over-rows">
+        <div>
+          <b>{bones}/{BONES.length}</b>bones
+        </div>
+        <div>
+          <b>
+            {goalsDone.length}/{GOALS.length}
+          </b>
+          challenges
+        </div>
+      </div>
+      <button className="hud-play" onClick={again}>
+        PLAY AGAIN
+      </button>
+      <span className="hud-hint">or press Enter</span>
+    </div>
+  )
+}
+
 export default function GameUI() {
   const started = useGame((s) => s.started)
   const { progress } = useProgress()
@@ -326,21 +425,28 @@ export default function GameUI() {
     if (PHOTO) useGame.setState({ score: 18720, bones: 3, started: true })
   }, [])
   const live = started || !!PHOTO
+  const runOver = useGame((s) => s.runOver)
   return (
     <div className="hud">
       <div className={live ? 'hud-widgets' : 'hud-widgets is-idle'}>
         <ScorePill />
+        {/* clock and goal card are session furniture — PHOTO fakes a session
+            for the HUD, but the reference captures are framed against the old
+            widget row and must not grow one */}
+        {!PHOTO && <TimePill />}
         <BonesPill />
         {live && <MuteWave />}
       </div>
+      {live && !PHOTO && <GoalList />}
       <TrickPopup />
-      {live && TOUCH && (
+      {live && TOUCH && !runOver && (
         <>
           <Joystick />
           <JumpButton />
         </>
       )}
       {!live && (loaded ? <StartOverlay /> : <LoadingScreen progress={progress} />)}
+      {runOver && <RunOver />}
     </div>
   )
 }

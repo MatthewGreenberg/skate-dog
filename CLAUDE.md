@@ -5,13 +5,15 @@ through a pastel skatepark. The park is entirely procedural — no image files, 
 network fetches. Textures are painted into canvases at load, geometry is built in
 code, props and foliage are baked into InstancedMeshes once and never touched.
 
-The two assets are `public/boy.glb` (the rider) and `public/dog_compressed.glb`
-(the dachshund he rides). Neither ships animation clips: both rigs are driven
-every frame by authored pose tables, so they react to the sim rather than
-playing a loop. See `player/boneRig.js` for what that costs.
+The assets are `public/boy.glb` (the rider) and `public/dog_compressed.glb` (the
+dachshund he rides). Neither ships
+animation clips: the boy and dog are driven every frame by authored pose tables,
+so they react to the sim rather than playing a loop — see `player/boneRig.js`
+for what that costs.
 
-The dog is Draco + KTX2 compressed; the boy is Draco only (his textures total
-~0.7MB — all 33MB of him was geometry). Both pass `/draco/` to `useGLTF`.
+The dog is Draco + KTX2 compressed; the boy is Draco only (his
+textures total ~0.7MB — all 33MB of him was geometry). All pass `/draco/` to
+`useGLTF`.
 The decoders are copied out of
 `three/examples/jsm/libs` into `public/draco` and `public/basis` — drei's
 default draco path is a gstatic CDN, and nothing here fetches over the network
@@ -26,10 +28,14 @@ src/game/
   store.js            useGame = UI state; P = per-frame state (never React state)
   level/
     levelData.js      authored layout. Single source of truth: renderer AND colliders read it.
-                      hpN/hpS are a halfpipe (two facing quarters, 4.6m flat)
+                      hpN/hpS are a halfpipe (two facing quarters, HP_FLAT 3.2m
+                      of flat, HP_H 2.0 walls — a 2.4m run puts the lip at
+                      ~80deg; h == the run would be dead vertical and the arc
+                      degenerate. All the z geometry hangs off the centre 24.5
+                      so the flat can be retuned in one place)
                       on a raised 0.35 platform (hpDeck, under STEP_UP so you
                       roll straight on) in the south-west corner. All four hp
-                      boxes carry style 'solid' and the quarters' width (8):
+                      boxes carry style 'solid' and the quarters' width (12):
                       Skatepark renders 'solid' as a pale blue sheet riding
                       surface (hpSurfMap; buildRampGeometry group 0 = surface,
                       group 1 = skirts/back, and hpDeck's box +Y face) over
@@ -47,6 +53,21 @@ src/game/
                       curvature (out.curv, 1/R on quarters) so the rig's
                       clearance lift is exact and instant instead of measured
                       a frame late.
+                      deckA's north/east and deckB's east walls are THICK (3m)
+                      on purpose: they run flush out to the kerb. At the old
+                      1.2 they left a 1.6m blind alley between their outer face
+                      and the kerb masonry, wrapping deckA's NE corner as an L
+                      — a tight nothing-space you rolled into and got stuck in.
+                      Inner faces are unmoved, so nothing inside the park
+                      changed. A collider face at the play edge means probes
+                      OUTSIDE the clamp; collision.check.js skips those
+                      (`inPlay`) because brute force has no clamp and
+                      "resolves" them out into the grass.
+                      The halfpipe's run-in is kept clear: the planters that
+                      used to sit at (-26,8) and (-34,16) stood in the only
+                      approach lane and made every entry a slalom. Their bed
+                      lives at (-35.5,24.5) now, alongside the pipe against the
+                      west kerb. Don't put props back in that lane.
                       The perimeter tree/shrub ring ellipses dip INSIDE the
                       rectangular play area at its corners — HP_CLEAR keeps
                       them out of the halfpipe, and TREES also drops any ring
@@ -86,7 +107,210 @@ src/game/
                       is Tripo's arbitrary atlas; at FUR_TILE 7 the strands are
                       sub-millimetre and read as surface, not as a hairstyle,
                       and an island seam is a direction change, not a line.
-    foliage.js        plant generation, pure data -> instance rows
+    foliage.js        plant generation, pure data -> instance rows. There are
+                      TWO leaf buckets and they are two GEOMETRIES on purpose:
+                      `foliage` (beds + bushes, Props.jsx `LEAF`) and `crown`
+                      (trees, `CROWN_LEAF`). They share the material, so it is
+                      one extra draw call, not a second wind program. The bed's
+                      blade is a fleshy succulent PAD and is signed off; the
+                      tree's is thin and pointed, because a 3.2:1 pad rounded at
+                      BOTH ends reads as a green jellybean stuck on a stick at
+                      chase distance — which is what the trees were. CROWN_LEAF
+                      is W 0.32 / L 2.55 / T 0.26 over CROWN_PROFILE (lanceolate:
+                      widest at 0.46, then a long taper to a real POINT — 0.72 of
+                      max width at t=0.75 closing over the last QUARTER, a 20deg
+                      half-angle, against the pad's 0.62 over 10% = 52deg, which
+                      renders as a rounded cap). Mean aspect 6.0:1 against the
+                      pad's 3.2:1 (4.0:1 at the crest), 6 stations x the same
+                      6-ring = 60 tris against the pad's 72.
+                      Do NOT unify the two blades — the direction asked for is
+                      the opposite. Thin costs coverage: a blade's plan
+                      footprint is (mean width x length x r^2) and bare fraction
+                      goes as exp(-f), so 0.53x the width was paid back with
+                      massClumps x1.61 + clumpR x1.08 (r is free — it is an
+                      instance scale, not a triangle, and LONGER is not a
+                      regression here: a long narrow blade is more leaf-like, a
+                      wider one is the jellybean). Net n*w*l holds to within 1%
+                      per mass. 134k crown rows / 8.1M tris across the park's 80
+                      trees and 1 planter tree, +35% on the jellybean build, in
+                      the same two draw calls. leafMass's jitter cone also RAMPS
+                      DOWN at the rim (0.34 -> 0.24 at edge 1): the cone is the
+                      only thing that can throw a blade past the crown envelope,
+                      and a 40%-narrower stray reads as debris where a pad read
+                      as foliage. Measured: crown edge density +30/33/43% on the
+                      three visible crowns, and the dome did not open. Every
+                      species' `bloom.per` is per LEAF ROW, so it divides by 1.45
+                      against the x1.61 count — a deliberate +11% net on the pink
+                      speckle, since a narrower leaf hides less of the head. A foliage
+                      instance is a LEAF BLADE, not a ball: Props.jsx's
+                      `leafBlade` is a succulent PADDLE centred on the
+                      origin running along +Y (7 stations x a 6-point ring = 72
+                      tris; both ends pinch, so it needs no caps). PROFILE is a
+                      lens: convex on both edges, widest at HALF its length, and
+                      blunt — the last station still carries 62% of max width, so
+                      the tip closes as a 52deg cone and renders as a rounded cap.
+                      The spear it replaced (widest at a fifth of the length,
+                      straight edges, a point) read as agave/yucca and spiked the
+                      bed silhouette against the pale paving. The ring is 6,
+                      not 4, and that is the difference between a succulent pad
+                      and a QUARTZ SHARD: a 4-gon section is a rhombus, so the
+                      blade carries a hard crease down its spine where two faces
+                      meet at ~50deg, and smooth vertex normals only turn that
+                      into a hard specular LINE. A 6-gon meets at 120deg. It is
+                      also PHASED half a step (RING_PHASE): at phase 0 no vertex
+                      lands on the crest, so the top of the lens is a flat facet
+                      running the whole length — the one hard longitudinal crease
+                      every blade used to show. Phase 30deg puts a vertex on the
+                      crest and straddles the margin with the pair that used to
+                      sit on the width axis, which also rolls the leaf EDGE
+                      instead of leaving it a knife; RING_K divides the resulting
+                      cos(30) back out or the silhouette quietly narrows.
+                      PROFILE is a true LANCEOLATE: ~35% of max width at the base,
+                      one crest at 45%, then a long taper over the whole top half
+                      through 18% at t=0.94 to a real POINT. It used to be 78% of
+                      max by t=0.16 and still 60% at t=0.93, which is a
+                      PARALLEL-SIDED CAPSULE with two rounded caps — at play
+                      distance the lawn crowns rendered as bottlebrush / hop
+                      cones. The two stations in the last 12% are what makes the
+                      tip converge as a blunt point rather than a chamfered cut.
+                      It is BROAD and FLESHY, and both of those are measured, not
+                      taste: 2.18:1 at max width but 3.28:1 as a mean (PROFILE's
+                      area is 0.664 of its bounding box), which is what the eye
+                      integrates at play distance and is the top half of the
+                      reference's 2.5-3.5:1 band. Do NOT narrow W to fix a bed
+                      that looks fat — that is a profile problem, and narrowing
+                      gives you the rosemary W exists to prevent. T (0.42 against
+                      W 0.585, ratio held at 1.33) matters MORE than
+                      W does, because the roll slot is 0 and so a blade's width
+                      axis is always horizontal and perpendicular to its own
+                      bearing — half of any rosette therefore presents its
+                      SECTION to the camera, and at the old T 0.3 that section
+                      was 8.4:1 and read as a spike stuck through the plant.
+                      Every
+                      plant in the reference is a rosette of pointed leaves and
+                      no amount of lumping makes a sphere read as one; the
+                      long-running "canopy reads as a faceted boulder" fight was
+                      a sphere problem. So a clump is AIMED: `clump()` takes the
+                      outward vector of the mass or rosette it belongs to and
+                      writes it into the same two slots a branch uses. Slot 8
+                      (roll) stays 0 on every foliage row for the same reason it
+                      does on a branch — bake() reads YXZ, which applies Z
+                      FIRST, so a roll swings the blade's own long axis off the
+                      aim. Per-leaf variety is a jitter CONE about the aim.
+                      A shrub lobe's aim is lifted (|oy| + lr*0.75) because an
+                      outward-only aim drives the lower half's tips into the
+                      paving. A CANOPY mass is not aimed outward at all any more:
+                      a blade along the mass's own radial presents its TIP to the
+                      silhouette, and a dome of those is a PIN-CUSHION — the lawn
+                      crowns rendered as a ring of blunt bullet-ends pointing
+                      radially out. leafMass builds a tangent frame on the radial
+                      and swings the aim 55-70deg off the normal into it, with a
+                      15deg downward hang, so the dome edge is a scallop of
+                      overlapping leaf TIPS lying across the surface. Two
+                      consequences, both paid for: an underside blade's aim is
+                      eased back toward level below -0.2 or its tip hangs a full
+                      length under the row the checks measure the crown floor
+                      from; and a tangential blade covers far LESS solid angle
+                      than a radial one, so massClumps went UP half again (to
+                      ~48) and clumpR down 0.84x with it — at the old count the
+                      first tangential capture came back as lace with daylight
+                      between every leaf.
+                      A bed's body is a field of COUNTABLE ROSETTES on a
+                      JITTERED GRID, and the grid is the point: 11 blades round
+                      one shared centre was already true when the beds still read
+                      as chopped foliage, because the CENTRES were a Poisson
+                      scatter and at closing density two land 0.2 radii apart as
+                      often as 1.5, so a third of the stars fused. The
+                      reference's readability comes from the GAPS. Pitch is
+                      `gap` (2.9) x a rosette's plan reach — PAST the 1.41 a
+                      square grid of discs closes at, on purpose, so the rosettes
+                      do not tile and a dark valley survives between neighbours.
+                      **The bed is not supposed to close.** The reference shows
+                      soil-dark wedges between plants and that is what makes them
+                      countable, so the plan target is ~92% mean / 87% worst, not
+                      solid. Measured across foliage.check's 60 beds: gap 2.0 ->
+                      99.9%, 2.3 -> 97.9, 2.6 -> 95.9, 2.9 -> 91.6, 3.2 -> 89.2
+                      and the soil starts reading as patches rather than wedges.
+                      Jitter is +/-9% of pitch;
+                      more and it is a scatter again. 10 blades leave ONE shared
+                      centre (OFF_R 0.14 — at 0.4 each base sat a third of a
+                      radius out along its own bearing and the rosette had a hole
+                      where its centre should be), splayed 45-75deg off vertical
+                      (`splay` = tan, 1.0 + t^2*2.55 across the whorl, so the star
+                      has a crown and a skirt). The FINE layer is now thin
+                      (fineF 1.35, was 2.6): its job is to stop soil showing
+                      THROUGH a plant, not to fill the space BETWEEN two of them,
+                      and at 2.6 it was standing in every valley the grid opens.
+                      foliage.check.js's bed raster models a blade as a plan
+                      CAPSULE — project the row's aimed segment (-0.42L to +0.58L
+                      of its scaled length) onto the ground, give it the blade's
+                      half-width. The old single-number disc model (LEAF_EFF)
+                      broke twice, because it cannot see where a blade points:
+                      don't reintroduce it.
+                      The bed's height ramp is tuned for RANGE at fixed MEAN:
+                      0.20 + 0.58q has the same mean (0.45 over a rectangle's q)
+                      as the old 0.28 + 0.40q and a range of 0.79 instead of
+                      0.55, which is what reaches lime at the crest and a real
+                      mid-green in the valleys. Do not lift the base instead —
+                      the medians already match the reference.
+                      Every species has a `core`: one leafMass over the crown's
+                      own centre. A crown is a DOME, not N balls on sticks —
+                      every other mass hangs off a branch, so the cone of air
+                      directly over the fork was only ever closed by `fill`, and
+                      from the 40deg camera you saw trunk and paving straight up
+                      through the middle. leafMass squashes y by 0.82 on its own,
+                      so a core renders 1.22 wide for 1 tall. Branch-tip masses
+                      are also pulled 12% back down the shaft (TIP_IN): centred
+                      ON the tip, a mass puts its outer clumps a full radius
+                      beyond any wood and the ones that clear the silhouette read
+                      as detached specks floating beside the tree.
+                      A PLANTER tree is `pushTree(..., 'blossom')` BY NAME. Left
+                      to the random draw it took a lawn species two thirds of the
+                      time, and a 2.5-3.4m trunk in a 1.4m planter renders as a
+                      cone on a pole.
+                      White and pink blooms are 5-petal daisies (`daisy`) rather
+                      than spheres, and the pip is a YELLOW EYE — most of what
+                      separates a daisy from a blob of cream at chase distance.
+                      It rides a vertex-colour attribute rather than a second
+                      bucket, because instanceColor and vertexColor BOTH multiply
+                      the material base: the pip carries the ratio
+                      flowerYellow/flowerWhite, taken against WHITE deliberately,
+                      so the white daisy lands on the exact yellow and the pink
+                      one gets the same eye a stop warmer. MAT.flowerWhite/Pink
+                      therefore need `vertexColors: true` and the yellow bucket
+                      (which has no colour attribute) must NOT have it.
+                      YELLOW is not a daisy: it is `budCluster`, a knot of four
+                      two-thirds-overlapping beads plus a crown bead, and it is
+                      the bed's DOMINANT flower (82% of clusters) because that is
+                      what the reference reads as from across the plaza. Three
+                      things about it are load-bearing. The bead ring radius is
+                      well UNDER the bead radius, so the beads fuse into a lumpy
+                      ball — where they merely kissed, the knot rendered as a
+                      CORN COB from the 40deg camera, and six beads read as a
+                      ridged cylinder however they were spaced (four beads at 6x4
+                      segments is both rounder and cheaper). pushBlooms' own
+                      scatter for the yellow tint is 0.055, not the daisies' 0.22:
+                      the knot shape is the geometry's job, and a wide scatter put
+                      two heads side by side as a sausage. And the albedo is a
+                      saturated GOLD (`flowerYellow` hsl 48/90/52): #f7dc8c was a
+                      cream, which on lime renders as a bleached patch rather than
+                      a flower, and hsl 50/88/58 was still pale popcorn sitting a
+                      stop ABOVE the lit leaf — it has to read as a different
+                      material from the leaf, not a brighter version of it.
+                      There is no LILAC in the bed. The pale pink heads went from
+                      14% of bed clusters to 4%: against the lavender planter rim
+                      they read as lilac popcorn, a colour the reference does not
+                      contain, and they outnumbered the yellow it leads with. Pink
+                      belongs on the TREE, where it sits against green.
+                      EVERY species carries a `bloom` table that
+                      speckles pink over the crown by SAMPLING the leaf rows
+                      that tree just emitted — solving a crown radius and
+                      scattering over the sphere puts a third of them in mid-air,
+                      because a crown built from masses is not a sphere. It used
+                      to be `blossom` only, and since both the lawn trees and the
+                      planter tree drew their species at random that meant two
+                      thirds of the park's crowns had no speckle at all.
+  goals.js            the run's challenge table (see "The run" below)
   components/         Game (canvas + post), Lighting, Skatepark, Props, Player, Effects, UI
                       Intro.jsx = the SKATE DOG title as troika text (drei
                       <Text>) floating in the park, billboarded to the camera.
@@ -153,7 +377,71 @@ src/game/
                       'bone' (gold star burst + ring in Effects, arpeggio in
                       AudioManager), scores 500 (2500 + ALL BONES! on the 5th)
                       and ticks the HUD bone pill. bones.check.js asserts the
-                      float band and spacing.
+                      float band and spacing. It exports R2 and POP because
+                      Letters.jsx collects on exactly those — a second
+                      collectible with its own radius is a rule difference
+                      nobody can see until they measure it.
+                      Letters.jsx = D-O-G, the S-K-A-T-E letters (levelData
+                      LETTERS). Troika <Text>, so zero new assets — the font is
+                      already served locally for the intro title. BILLBOARDED,
+                      not spun like a bone: a troika glyph is a flat
+                      single-sided quad, so a world-Y spin shows you the letter
+                      backwards half the time, and reading which one you still
+                      need from across the park is the whole objective. Parked
+                      on the three transitions the bones DON'T use (bank4 onto
+                      pad2, the ledge1 grind, bank2 onto deckB) so spelling the
+                      word walks you round the park.
+                      Cans.jsx = five smashable trash cans (levelData CANS).
+                      A can is NOT a collider — you ride through and it bursts.
+                      The hit is a horizontal circle GATED ON THE FEET being in
+                      the can's height band, or a big air over the top counts as
+                      a smash. Modelled off a galvanised PERFORATED municipal
+                      bin: punched barrel, solid collar + rolled lip, stepped
+                      foot, white litter badge, and a lid whose handle is a
+                      CHILD of the lid — it has to leave with it. The dot field
+                      is an alphaMap on a generated canvas (staggered grid,
+                      wrapped in x or the odd rows clip into a seam up the can),
+                      NOT geometry — 600 holes x 5 cans is a CSG bill for a prop
+                      you ride through — and it is alphaTest, not transparent,
+                      so the holes are real to the shadow map and there is no
+                      sort order. The BackSide liner is what you see THROUGH
+                      them; it was already there for the mouth. The drum is
+                      smooth 20-sided now: faceting a surface whose read is a
+                      regular dot grid beats against it. Two coplanar-surface
+                      z-fights were paid for here: the parts are lifted 8mm off
+                      the paving plane (the drum's bottom cap and the foot ring
+                      both sat exactly ON it, reading as aliasing crawling round
+                      the base), and the drum's bottom cap is RECESSED 2.5cm up
+                      into the foot ring (FOOT_IN) instead of sharing its plane —
+                      that pair z-fought into a pinwheel you only ever saw once
+                      the wreck rolled the can onto its side. Everything above
+                      the foot is offset by FOOT_IN with it, LID_Y included,
+                      because the frame loop rewrites the lid's y. The wreck is ballistic, not
+                      physics: launched along TRAVEL (the dog is a 13 m/s
+                      wrecking ball) at 0.75x speed, tumbling about the axis
+                      ACROSS travel, hand-integrated and never asking the level
+                      a question after the first frame. The group that tumbles
+                      sits at the can's CENTRE with an inner group pushing the
+                      parts back down — rotating the base group end-over-end
+                      swung the drum through the paving — and its height floor
+                      is the body's half-DIAGONAL, eased in over the pop, since
+                      a tumbled corner reaches further down than H/2 — Skatepark bakes every
+                      world matrix once and turns off matrixWorldAutoUpdate, so
+                      a can that queries the ground while moving is a whole
+                      second class of object in a park that has none. It emits
+                      its own `'smash'` (not `'bone'`): Effects throws paint
+                      chips + grit fanned along travel with a ground shockwave,
+                      plus ~10 pieces of LITTER out of the mouth (Effects'
+                      `trash` pool — the one pool here with a LIT
+                      MeshStandardMaterial, because a scrap of rubbish is a real
+                      object in the park for a second and a toneMapped:false
+                      one reads as another sparkle; it tumbles about a single
+                      fixed axis stored in the pool's `q` slots with the spin
+                      RATE in q.w, and never asks the level where the floor is —
+                      it shrinks out about when it would have landed),
+                      and AudioManager clangs an INHARMONIC drum (1, 1.51, 2.13,
+                      2.77, 3.61 — equal-tempered partials read as a bell, and a
+                      bell reads as a reward) before the score chime.
                       Rider.jsx = boy.glb + the pose table that drives it. The
                       ride pose is a real crouch, and the two legs' angles are
                       MIRRORED across the pair (front thigh 0.68 forward / shin
@@ -241,6 +529,11 @@ src/game/
                       which flattens the apparent angle of a yaw (the nose lands
                       at (LONG*cos, sin)) — so a longer dog needs a bigger bend
                       for the same read: 0.34 raw is ~35deg on screen at 1.16.
+                      Grinds add a balance wobble (roll + a quarter of it as
+                      yaw, two detuned sines) gated on `splay` — the same
+                      damped grind blend the leg splay uses, so it eases in and
+                      out instead of popping. It is on the DOG's root only, so
+                      the rider rides steady on top of it.
                       The tongue is a capsule, not a bone — the GLB has none.
                       It is authored at the bind-pose mouth in model space, then
                       `attach`ed to the skull bone at mount: it used to just sit
@@ -285,7 +578,13 @@ src/game/
   audio/
     AudioManager.js   fully synthesised SFX, no files. Cartoon-styled: slide-whistle
                       jump/bail, boing landings, per-surface paw patter and
-                      rolling noise, glassy pentatonic shimmer on 'bigair'. There is deliberately NO dog voice — the
+                      rolling noise, glassy pentatonic shimmer on 'bigair'.
+                      Clearing a SET — 'goal' with id 'fetch' (all 5 bones) or
+                      'cans' (all 5 smashed) — adds sfxFanfare on top of the
+                      shimmer + chime every goal gets: a rising arpeggio landing
+                      on a held triad over a noise cheer, all in ONE pooled
+                      voice, since the pool is 8 and a ten-note fanfare taken a
+                      voice per note evicts itself halfway through. There is deliberately NO dog voice — the
                       yip/whine generators and their four call sites were removed
                       by request; don't reintroduce barking on jump/trick/bail
                       or through a grind.
@@ -318,9 +617,15 @@ src/game/
                        long air or rail can't time the chain out.
                        scoring.check.js measures both rates on r1 and that
                        plain rolling drops the chain. Pool Gap (+400) pays for
-                       flying over the bowl: the air must reach k<0.7 of the
-                       polar rim radius and LAND at k>1, so an ordinary air out
-                       of the deep end and back in doesn't count. G is 22, so a
+                       flying over the bowl: the air must be CLEAR of the rim
+                       (k>1) at some point first, then reach k<0.7 of the polar
+                       rim radius, and LAND at k>1. All three, because two of
+                       them alone still pays for an air you didn't fly: without
+                       the land test an ordinary air out of the deep end and
+                       back in counts, and without the leave test (trick.leftPool)
+                       a straight ollie off the bowl's flat bottom onto the deck
+                       counts — it starts inside the hole, so the k<0.7 test is
+                       already satisfied on its first airborne frame. G is 22, so a
                        flat ollie clears ~9m and the full 12m diameter is out of
                        reach — the line that pays is a corner cut across the
                        rim. Air tricks are on the
@@ -351,13 +656,50 @@ src/game/
                        >0.3s of air) pays a momentum boost (CLEAN_BOOST +
                        airtime bonus, capped at 1.25x MAX_SPEED) — the pump
                        loop. steering.check.js asserts an ollie lands faster
-                       than it took off. Landing in a transition (slope > 0.35)
+                       than it took off.
+                       Two halfpipe aids: PUMP and ALIGN. Holding W on a wall
+                       cannot drive you (pushK -> 0.15 by design), so a session
+                       only ever LOST energy crossing the flat; the pump term is
+                       NOT on the throttle (a pump is what riding a transition
+                       IS — hands off, the pipe sustains ~0.85m over the coping
+                       indefinitely), it is
+                       gated on surf.curv (nonzero only on a quarter's arc),
+                       applied along the direction of TRAVEL — facing-aligned it
+                       brakes you on the fakie roll-out — and fades to zero at
+                       MAX_SPEED, so it tops a session up rather than winding it
+                       up. ALIGN eases the heading onto the fall line when
+                       steer is EXACTLY zero. It runs off a PIPE_HOLD timer, not
+                       off the live slope: a quarter (surf.curv > 0 — colliders
+                       computes curvature for 'quarter' ONLY, so the bowl is
+                       excluded on purpose; a bowl wants carving lines, and
+                       guiding there made the 3s trajectories chaotic enough to
+                       break collision.check.js's dt agreement) stores its fall
+                       line as pipeAxis and holds it 0.9s, which carries the
+                       assist across the 3.2m flat — otherwise the guide ends at
+                       the bottom of every wall and the run to the other one is
+                       exactly where you drift out the side. A 40deg entry now
+                       peaks 3.0m off centre of the 6m half-width instead of
+                       leaving the pipe; ramps.check.js asserts it. resetPlayer clears
+                       the hold — a stale axis steers the next run or respawn,
+                       which is what failed stairA's climb in ramps.check.js.
+                       Any steer input switches it off, so it never fights a
+                       correction you are making.
+                       Landing in a transition (slope > 0.35)
                        moving OPPOSITE your facing auto-turns the heading to
                        the travel direction, easing the visual 180 through
                        spinResidual — without it a halfpipe session dies
                        against one wall with the throttle fighting the
-                       roll-out. Flat fakie is untouched. ramps.check.js
-                       asserts a throttled halfpipe session pumps wall to
+                       roll-out. Flat fakie is untouched. It is gated on the
+                       FALL LINE, not on velocity alone: landing already facing
+                       the roll-out while the velocity still carries up the wall
+                       read as fakie under the old test and spun a deliberate
+                       180 straight back into the wall. It fires only when
+                       facing UPHILL, and aims at downhill — the horizontal
+                       projection of the NORMAL, +(nx,nz). Negating that points
+                       UPHILL and the session dies at one wall (it did, in
+                       testing). ramps.check.js
+                       asserts a landed 180 is left alone, and a halfpipe
+                       session pumps wall to
                        wall. P.surfLift lifts the rendered rig by measured
                        path curvature (the rendered dog is ~1.6m nose to tail
                        and chords ~12cm deep into the 2.6m quarter — cap 0.12,
@@ -382,6 +724,57 @@ public/fonts/         Luckiest Guy (OFL), the intro title face — local for the
                       same reason as the decoders
 ref/                  the reference stills the art is measured against
 ```
+
+## The run
+
+The park is not a sandbox any more. A session is a **2:00 clock you extend by
+playing**: every bone and every completed challenge is +15s, a bail is −5s, and
+zero puts up a scorecard with PLAY AGAIN. `RUN_TIME`/`TIME_BONUS`/`TIME_BAIL`
+are the knobs, all in store.js. A short base clock is the point — at a flat 5:00
+the challenges carry no urgency and the timer is only pressure in the last
+thirty seconds.
+
+There is no `lives`. There used to be, and it did nothing: never displayed,
+and `bail()` reset it to 3 the instant it hit zero. Time is the one resource.
+
+**The clock lives on `P.timeLeft`, not in the store.** GameLoop mirrors it to
+`useGame.timeLeft` only when the whole SECOND changes — a per-frame store write
+is 120 HUD renders a second. `addTime()` writes through to both for the same
+reason a bonus that only landed in the store would be erased on the next frame.
+The clock does not run during the 1.5s intro swoop.
+
+`goals.js` is the challenge table, and the design constraint is that **every
+goal is detected from an event the controller already emits** — no goal owns a
+timer, a collider or a probe of its own. A second measurement of "was that a
+long grind" would drift from the one the scorer uses and the card would disagree
+with the trick tape. So Rail Hound listens for the `'Long Grind'` name the
+scorer already produces at 1.6s, Pool Party for `'Pool Gap'`, Off the Leash for
+`'bigair'`. The two score tiers are the only pollers (4Hz). The three
+collectible objectives own their own proximity tests and call `complete(id)`.
+
+Three things that bite here:
+
+- **`complete()` must be idempotent, and the guard belongs in `complete()`.**
+  Every predicate is subscribed to an event that legitimately repeats — a second
+  Pool Gap is still a Pool Gap — so without it one challenge is an infinite time
+  machine. `goals.check.js` asserts a repeat call pays nothing.
+- **Grind payout does not go through `award()`** (PlayerController says so
+  explicitly at the exit-grind settle, because it would double-count), so a
+  grind challenge listens for the `'trick'` emit, not for `award`.
+- **`P.inBowl` is a SURFACE flag** and reads false the entire time you are
+  airborne over the hole. Pool Party keys off the trick name.
+
+Restarting is three resets, and all three are load-bearing: `resetPlayer()` for
+the rig, `resetGoals()` for the module state the goals keep outside React, and
+`restart()` for the store — whose `runId` bump is keyed onto the group holding
+Bones/Letters/Cans. Their "already got" flags are `useRef`s with no
+reset path, so **a remount IS the reset**.
+
+PHOTO mode never enters any of this: the capture branch returns before the clock
+ticks, GameUI hides the time pill and goal card, and Letters render
+nothing (same rule as Intro.jsx — the plaza and bowl captures are compared
+against the reference stills and must not grow gameplay furniture). Cans stay
+visible; those are park furniture.
 
 ## The palette is a contract, not a suggestion
 
@@ -422,7 +815,7 @@ node tools/px.mjs shots/mywork-bowl.png open,0.62,0.90,16   # measure a patch
 node tools/compare.mjs ref/ref-plaza.png shots/mywork-plaza.png out/ key.json
 ```
 
-Poses: `plaza bowl hero props grove deck pipe`. `plaza` and `bowl` are framed to match
+Poses: `plaza bowl hero props grove deck pipe bench`. `plaza` and `bowl` are framed to match
 the two reference stills, so they can be compared directly.
 
 `compare.mjs` builds a **blind** A/B sheet — reference and capture side by side,
@@ -446,7 +839,8 @@ Plain `node`, no framework. Run them after touching what they cover.
 node src/game/level/foliage.check.js       # crowns, branch coverage, colour space
 node src/game/level/benches.check.js       # bench facing + footing vs walls/planters/decks
 node src/game/level/rails.check.js         # rail/post clearance vs walls, props, solids, other rails; lip-edge grinds
-node src/game/level/bones.check.js         # collectible bone float band + spacing
+node src/game/level/bones.check.js         # bone + D-O-G float band/spacing, can clearance
+node src/game/goals.check.js               # each challenge pays once for +15s; predicates discriminate
 node src/game/level/ramps.check.js         # every ramp + stair enterable, climbable, qp1 pops vert, early pop transfers to deck
 node src/game/level/collision.check.js     # ~40s: broad-phase coverage, wall penetration, ramp seams, drops, dt consistency, perimeter
 node src/game/input.check.js              # world-directional touch stick converges on the stick angle
@@ -475,7 +869,9 @@ Two of its assertions are worth knowing about before you tune the plant tables:
 a **grain** check (a clump must stay under 32% of the mass it sits in, and
 `n * ratio^2` must clear 0.9 so shrinking clumps without raising the count does
 not open the canopy into lace) and a **coverage** check that rasterises a bed's
-plan and demands 96%+ closed.
+plan and demands 82%+ closed — deliberately NOT solid any more, see the pushBed
+notes above; the reference's own bed shows soil-dark gaps between rosettes and a
+bed that rasterises solid is a bed you cannot count a plant in.
 
 ## Gotchas paid for in blood
 
@@ -619,6 +1015,25 @@ plan and demands 96%+ closed.
   the outward normal. All four bowl benches shipped with the second, backs to
   the bowl and knees against a wall 1.2m away — a sign error that reads as
   deliberate set dressing from any distance. `benches.check.js` measures it.
+- **A bench slat is one board, so its grain runs along its LENGTH.** The slats
+  wear the ramp ply maps (`woodMap`/`woodNormal` — cached, so no second wood
+  canvas), whose planks run along canvas *v*; `slatGeo` therefore writes v from
+  local x and u from the short axis. It rides ONE of the tile's seven planks and
+  which one is measured, not picked: 6 is the darkest tone (RAMP.wood at 0.20),
+  a slat is parked on its CENTRE with only ±0.04 canvas of span (or the black
+  plank-edge line runs as a groove down the middle of every slat), and v starts
+  clear of that plank's butt seam — the slat spans 0.83 canvas and leaves 0.17
+  of slack, so a seam inside the span lands in the SAME place on all seven and
+  reads as one straight crack across the whole bench. The material tint is NOT
+  `C.benchWood`: it multiplies a map that already carries a mid-tan. It was
+  SOLVED against a capture rather than derived — map average, grain passes and
+  the tone curve all move it — and lands a sunlit seat at (191,153,116) against
+  benchWood's (184,146,110). Re-measure it if the light rig moves. `woodRough` is
+  a remap of the SAME height field `woodNormal` is sobelled from (`plyHeight`,
+  now cached separately) — a ridge the normal bumps up is a ridge the varnish
+  makes glossier, and a seam, black in the height, clamps back to the authored
+  roughness. The ramp materials deliberately still go without it: they are what
+  the halfpipe captures are compared against.
 - **A handrail is generated, so it doesn't know what it's standing in.**
   `handrail()` offset the rail `w/2 + 0.5` from the stair's centreline — just
   outside the tread. stairB is wedged between deckA's retaining wall and a
@@ -688,6 +1103,19 @@ plan and demands 96%+ closed.
   short orbit — 692 distinct values in 5000 draws. It went unnoticed for as long
   as every consumer drew a few dozen values; `pushBed` draws thousands and the
   bed came out as 94 columns of identical clumps. All four copies use `imul` now.
+- **One stream per PLANT, never one per planter.** `Planters` used to make a
+  single `rnd` and hand it to `pushTree` first and `pushBed`/`pushBlooms`
+  second, so the bed's draw began at whatever offset the tree happened to leave
+  the sequence at — and any tree edit changes how many values the tree consumes.
+  Raising the crown clump counts therefore re-randomised every rosette, berry
+  knot and daisy in every planted bed: a pixel diff measured the static planter
+  frame at 1.5% changed and the bed interior at 50-69%, on bed tables that were
+  byte-identical. It is `bedRnd` (7331) and `treeRnd` (8101) now, and the
+  independence is provable — perturb `SPECIES.blossom.massClumps` and the
+  `foliage`/`flowerYellow`/`flowerWhite` rows come out identical. (`flowerPink`
+  is a SHARED bucket — tree blossom and bed accents both land in it — so its
+  array order still moves; the bed's own rows in it do not.) Lawn trees and lawn
+  shrubs were never exposed to this: they already take a per-instance stream.
 - **Foliage colour is set by histogram, not by patch.** Two sampled patches
   cannot see a distribution that is the right shape at the wrong centre, which
   is exactly what shipped: crown and core both landed near target while the
@@ -701,6 +1129,15 @@ plan and demands 96%+ closed.
   are now (`leaf*` in palette.js, one third of a stop down, greener, and
   saturated PAST the reference because averaging ~100 differently-lit clumps
   per crown plus a violet ambient eats ~10 points before the frame is drawn).
+  Then the SAME failure repeated one axis over. Against ref-foliage the crowns
+  measured hue 78 / L0.43 / **sat 0.36** where the reference is 78 / 0.41 /
+  **0.53** — hue and value dead on, chroma 17 points short, which is a shape a
+  two-patch check cannot see for exactly the reason above. So histogram
+  saturation and hue, not only lightness, and crop the TREE and the BED
+  separately: the reference's bed is hue 90 and its crown is hue 78, a full ramp
+  stop apart, so one `leaf*` trio measured over both averages the difference
+  away. That split is why `shrub` is greener than `leaf` now, and why the leaf
+  stops carry s74-86 to render at s48-50.
 - **A canopy ramped by height alone reads as noise.** From a 40-degree camera
   every leaf mass presents its equator, so a height ramp resolves into
   concentric bands and the eye reads the leftover per-clump jitter instead.
@@ -730,7 +1167,8 @@ plan and demands 96%+ closed.
 ## Licence
 
 Source is PolyForm Noncommercial 1.0.0 (`LICENSE`), commercial use by separate
-paid licence. So: no copyleft dependencies, and `public/{boy,dog_compressed}.glb`,
+paid licence. So: no copyleft dependencies, and
+`public/{boy,dog_compressed}.glb`,
 `public/songs/*` and `ref/*` are carved OUT of the grant — they ship so the
 project runs, they are not licensed for reuse. README.md is the public-facing
 version of this file.

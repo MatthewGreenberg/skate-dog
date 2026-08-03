@@ -576,8 +576,8 @@ export function hpSurfMap() {
 }
 
 /** Plank relief: seams read as grooves, grain as faint long ridges. */
-export function woodNormal() {
-  return cached('woodN', () => {
+function plyHeight() {
+  return cached('plyH', () => {
     const S = 512
     const [c, x] = canvas(S, S)
     const N = 7
@@ -604,8 +604,40 @@ export function woodNormal() {
     x.fillStyle = '#000'
     for (let i = 0; i <= N; i++) x.fillRect(i * pw - 1, 0, 2, S)
     grain(x, S, S, 8000, 0.08, 45)
-    const t = normalFrom(c, 1.3)
+    return c
+  })
+}
+
+export function woodNormal() {
+  return cached('woodN', () => {
+    const t = normalFrom(plyHeight(), 1.3)
     t.repeat.set(4, 4)
+    return t
+  })
+}
+
+/**
+ * Varnished-board gloss, off the same height field the normal uses — so the
+ * ridge the normal bumps up is the ridge the roughness makes glossier, and a
+ * seam groove is the dullest thing on the board (dirt collects in it).
+ * roughnessMap MULTIPLIES material.roughness, so 255 is "as authored".
+ */
+export function woodRough() {
+  return cached('woodR', () => {
+    const src = plyHeight()
+    const S = src.width
+    const [c, ctx] = canvas(S, S)
+    const img = src.getContext('2d').getImageData(0, 0, S, S)
+    const d = img.data
+    for (let i = 0; i < d.length; i += 4) {
+      // 190 is the height field's plank floor: a board sits a touch glossier
+      // than authored (235), a grain crest glossier again, and a seam — which
+      // is black in the height — clamps back to full authored roughness.
+      d[i] = d[i + 1] = d[i + 2] = Math.max(0, Math.min(255, 235 - (d[i] - 190) * 0.5))
+    }
+    ctx.putImageData(img, 0, 0)
+    const t = tex(c, 4)
+    t.colorSpace = THREE.NoColorSpace
     return t
   })
 }

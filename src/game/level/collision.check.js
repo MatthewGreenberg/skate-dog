@@ -17,6 +17,14 @@ const RADIUS = 0.5
 const RAMP_OVER = 1.0
 const CAP_STEP = 0.3 // mirror of colliders.js: caps are landable, not steppable
 
+// The player centre is CLAMPED to PERIMETER (see the perimeter section), so a
+// point outside it is not a state the sim can reach. Probing/starting there
+// reports false misses for any collider whose face sits at the play edge — the
+// deck walls run flush to the kerb, and brute force, which has no clamp,
+// happily "resolves" them out into the grass.
+const inPlay = (x, z) =>
+  x >= PERIMETER.minX && x <= PERIMETER.maxX && z >= PERIMETER.minZ && z <= PERIMETER.maxZ
+
 const fails = []
 const notes = []
 function fail(tag, msg) {
@@ -188,6 +196,7 @@ function clearInput() {
   const step = 0.08
   let ringOf = null
   const probe = (x, z, feetY) => {
+    if (!inPlay(x, z)) return
     samples++
     // only count points whose CENTRE is outside the rect, so the depth formula
     // is unambiguous (radius - distance)
@@ -411,6 +420,7 @@ function clearInput() {
           const sx = w.x - dx * start
           const sz = w.z - dz * start
           const gy = groundHeightAt(sx, sz)
+          if (!inPlay(sx, sz)) continue // approach lane is outside the clamp
           if (Math.abs(gy - (w.base || 0)) > 0.3) continue // not standing at the wall's own level
           resetPlayer()
           clearInput()
@@ -672,6 +682,7 @@ function ride(s, entry, speed, dt, downhill) {
         const sx = cx - dx * 6
         const sz = cz - dz * 6
         const gy = groundHeightAt(sx, sz)
+        if (!inPlay(sx, sz)) continue // approach lane is outside the clamp
         if (Math.abs(gy - (w.base || 0)) > 0.3) continue
         runs++
         resetPlayer()

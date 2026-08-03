@@ -205,18 +205,105 @@ export const C = {
   // ~s40 out. This is the one place in the palette that is deliberately not a
   // measured reference value, because the measured value does not survive the
   // trip through this rig.
-  leafLight: '#858f28', // sun-struck cap: h66 s56 L36 — still yellow, not emerald
-  leaf: '#52691c', // h78 s58 L26 — the mode of the reference canopy
-  leafDark: '#2d4511', // h88 s60 L17 — shaded interior: deeper AND greener
-  shrub: '#626f1f', // h70 s56 L28 — beds read a touch lighter than the tree core
+  // ...and then the art direction moved, by request: the target is now the
+  // bright LIME ground cover of ref/ref-planter, not the olive of the original
+  // stills. Everything above still applies — the hue is held, the saturation is
+  // still carried past the reference for the same two reasons — only the value
+  // band moved up about a stop and a half. LIGHT.target.leaf* below moved with
+  // it; if a capture is compared against the OLD stills it will read hot, and
+  // that is the intended difference, not a regression.
+  // Third pass, and this one is a MEASUREMENT rather than an argument. Binning
+  // the green pixels of a grove capture against ref-foliage, cropped to the
+  // crowns and to the bed separately:
+  //
+  //             game crown          ref crown        game bed         ref bed
+  //   hue          78                  78              82               90
+  //   median L     0.43                0.41            0.35             0.34
+  //   median SAT   0.36                0.53            0.42             0.48
+  //
+  // Hue and value had already landed. The whole remaining gap is CHROMA, and it
+  // is 17 points on the crown. That is not a light-rig problem: the same
+  // capture's plaza and masonry are on target, and a violet ambient over a green
+  // albedo eats saturation without touching lightness, which is exactly the
+  // shape of this error. So the albedos take the compensation for a third time —
+  // ~s58 in rendered ~s38 out, so the stops go to s74-84 to land near s52.
+  // Hue also splits: the reference's TREE is hue 78 and its BED is hue 90, so
+  // `shrub` (which is the bed's mid stop) goes greener while the leaf* trio,
+  // which the crowns ride, holds 72-88.
+  // First capture of the above measured crown sat 0.48 (ref 0.53) and bed sat
+  // 0.53 (ref 0.48) — chroma landed, and what was left was a value trim in each
+  // direction. leafLight came down 4 points (the crown's lit tail carried 33% of
+  // its green pixels above L0.52 against the reference's 23%) and `shrub` came
+  // down 3 with 4 points of saturation off it (the bed measured L0.37 / s0.53
+  // against 0.34 / 0.48).
+  // Top stop only: the MEDIANS already match the reference (game bed h91 s50
+  // L35 vs ref h88 s50 L34), so a global brighten is exactly the wrong move.
+  // What was missing was RANGE at the LIT end — the reference's canopy runs to
+  // hue p10 66 and L p90 53, the game's stopped at hue p10 82 / L p90 45, so the
+  // bed read as one flat emerald mass instead of lime-on-top over mid-green
+  // valleys. h75 -> h64 and L60 -> L67 (+7) puts the sun-struck tips on the
+  // reference's yellow-lime. The dark stop is deliberately untouched: this is a
+  // contrast change, not an exposure change.
+  // Fourth pass, and it is about RANGE rather than centre. Binning the green
+  // pixels of the last grove capture against ref-foliage, medians agreed (bed
+  // L38 h92 s47 vs ref L34 h89 s49) but the two TAILS did not:
+  //
+  //                     game lit p80      ref lit p80     game dark p20   ref p20
+  //   lightness            0.49              0.53             0.25          0.18
+  //   hue                  85                71               91            98
+  //   saturation           0.50              0.57             —             —
+  //
+  // i.e. the game's lit end just gets LIGHTER at a constant hue where the
+  // reference's swings warm and saturated, and its shaded end never reaches a
+  // real mid-green. That is a stop-placement error, not an exposure error: the
+  // top stop moves toward yellow and gains chroma, the bottom stop moves toward
+  // blue-green and loses value, and the mid holds so the medians (which already
+  // match) do not move. SHADE_LIFT in foliage.js comes down with the dark stop —
+  // the lift existed to keep leafDark off black, and a darker stop needs it less
+  // than a lifted one needed it more.
+  // Fifth pass, TOP STOP ONLY. Binning the last grove capture's crown pixels
+  // against ref-foliage: median and shaded end now agree (game h81 s53 L34 vs
+  // ref h80 s53 L39) and the lit tail does not — game L p90 48 against the
+  // reference's 54. The canopy is missing the reference's yellow-lime highlight
+  // TOPS, which is a stop-placement error at one end, so leafLight goes L62 ->
+  // L68 and h59 -> h57. Nothing else moves: a global brighten would shift the
+  // medians, which are already on target, and this is the failure mode every
+  // comment above warns about arrived at from the other direction.
+  leafLight: '#f8f162', // sun-struck cap: h57 s92 L68 — +6 L on the lit tail
+  leaf: '#91be13', // h76 s82 L41 — the mode of the canopy, +6 chroma
+  leafDark: '#2b5b0b', // h96 s78 L20 — shaded interior: deeper AND bluer-green
+  // The bed measured h87 s51 against the reference's h96 s45 — nine degrees
+  // yellow of it with six points more chroma — so the bed's own mid stop takes
+  // the correction rather than the leaf* trio the crowns ride. h84 -> h89,
+  // s70 -> s65, L held at 45 because the bed's median lightness is on target.
+  shrub: '#75bd28', // h89 s65 L45 — beds read lighter AND greener than the tree core
   // Bark came down with the canopy. At L39 s45 a trunk rendered rgb(145,100,62)
   // — a bright orange stick under a green crown, and the most saturated warm
   // thing in a frame whose whole plaza is a pastel. It is a support, not a
   // subject: h28 s34 L33.
   trunk: '#715238', // reference bark is a grey-warm brown, not a saturated tan
   flowerWhite: '#fbf5ea',
-  flowerPink: '#f4aac4',
-  flowerYellow: '#f7dc8c',
+  flowerPink: '#f7bcd0', // ref blossom measures hsl(334 80 89) — paler than it looks
+  // The reference's dominant flower, and the old '#f7dc8c' was not a yellow at
+  // all: hsl(45 86 76) is a cream, and a cream sitting on lime renders as a
+  // BLEACHED PATCH — a grove capture had 1.9% "yellow-ish" pixels and not one of
+  // them was legible as a flower. Isolating the reference's flower pixels
+  // (h 38-62, s > 0.55, L > 0.45) gives hsl(58 86 61), rgb(241,232,72): a real
+  // lemon, a third of a stop DARKER than the lit leaf it sits on rather than
+  // lighter, which is what lets it read as an object instead of a highlight.
+  // ...and then one hue step further. At h58 the bud knots read as a lighter
+  // LIME than the leaf under them — the reference's are a golden yellow you
+  // register as a different material, and isolating its bud pixels alone (not
+  // all its flower pixels, which averages the white daisies in) gives
+  // hsl(50 87 60). h50 s88 L58 is that, and the 8-point drop in value is what
+  // stops a knot blowing through the bloom threshold on the crest of a mound.
+  // ...and one step further again, measured off a capture rather than argued:
+  // at h50 s88 L58 the knots rendered as PALE POPCORN — a cream-gold that sat a
+  // stop above the lit leaf and read as a highlight, the same failure the
+  // '#f7dc8c' note above describes, arrived at from the other side. The
+  // reference's buds are a saturated gold you read as a different material from
+  // the leaf, not as a brighter version of it. h48 s90 L52.
+  flowerYellow: '#f3c716',
   soil: '#6b5142',
 
   // characters -------------------------------------------------------------
@@ -351,11 +438,22 @@ export const LIGHT = {
     // a value the crown as a whole should hit. When the two disagree, believe
     // leafModeL below: a canopy that meets leafCrown on average is the
     // half-stop-hot failure the leaf* comments describe.
-    leafCrown: [146, 140, 67], // was [146,164,87] — measured G/R is 0.96, not 1.12
-    leafCore: [43, 47, 18],
+    // Moved up with the lime repaint (see C.leaf* above). These are no longer
+    // readings off ref/ref-grove — they are the new intent, scaled by the same
+    // albedo-to-render ratio the old pair held.
+    leafCrown: [196, 205, 104],
+    leafCore: [62, 74, 28],
     // and the shape of the distribution, which a two-patch check cannot see:
-    // over green pixels, the MODE of lightness must land 20-27%, not 40+.
-    leafModeL: 0.22,
+    // over green pixels, the MODE of lightness must land in this band.
+    leafModeL: 0.36,
+    // Chroma is the target the two patches above kept missing, because two
+    // samples cannot see a distribution that is the right VALUE at the wrong
+    // saturation — the same failure mode the leaf* comments describe for
+    // lightness. Median over green pixels (hue 40-140, sat > 0.14), cropped to
+    // the crowns / to the bed, measured off ref-foliage:
+    leafSatMed: 0.53, // tree crown
+    shrubSatMed: 0.48, // planter bed
+    shrubHueMed: 90, // the bed is a full ramp stop greener than the tree
   },
 
   // What is STILL wrong after the palette pass, measured off shots/palette-*.png

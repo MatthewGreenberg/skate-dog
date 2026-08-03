@@ -225,5 +225,51 @@ for (const speed of [8, 12]) {
   )
 }
 
+// Enter the pipe crooked and hands-off, and it must keep you IN it: a few
+// degrees of heading error is metres of sideways drift by the lip, and you left
+// out the side instead of over the coping. The assist (fall line + PIPE_HOLD
+// across the flat) bounds it.
+{
+  const hpN = SOLIDS.find((s) => s.id === 'hpN')
+  const hpS = SOLIDS.find((s) => s.id === 'hpS')
+  resetPlayer()
+  input.steer = 0
+  input.throttle = 1
+  const a = Math.PI + (40 * Math.PI) / 180 // 40deg off square
+  P.pos.set(hpN.x, hpN.y0, (hpN.z + hpS.z) / 2)
+  P.heading = a
+  P.vel.set(Math.sin(a) * 6, 0, Math.cos(a) * 6)
+  let drift = 0
+  let airs = 0
+  let wasAir = false
+  for (let i = 0; i < 720; i++) {
+    updatePlayer(1 / 60)
+    drift = Math.max(drift, Math.abs(P.pos.x - hpN.x))
+    if (P.state === 'air' && !wasAir) airs++
+    wasAir = P.state === 'air'
+  }
+  assert(drift < hpN.w / 2 - 1, `a 40deg entry drifted ${drift.toFixed(1)}m sideways of the ${hpN.w / 2}m half-width`)
+  assert(airs >= 4, `crooked entry only aired ${airs} times in 12s`)
+}
+
+// The vert auto-turn must not undo a 180 you MEANT. Land on the north wall
+// already facing the roll-out (downhill, +z) while the velocity is still
+// carrying up the wall: the old velocity-only test read that as fakie and spun
+// you back into the wall.
+{
+  const hpN = SOLIDS.find((s) => s.id === 'hpN')
+  const z = hpN.z - 0.6 // partway up the transition
+  resetPlayer()
+  input.throttle = 0
+  input.steer = 0
+  P.pos.set(hpN.x, groundHeightAt(hpN.x, z) + 0.05, z)
+  P.state = 'air'
+  P.heading = 0 // +z, out of the wall — the correct roll-out facing
+  P.vel.set(0, -3, -4) // still travelling up the wall as it touches down
+  updatePlayer(1 / 60)
+  const off = Math.abs(Math.atan2(Math.sin(P.heading), Math.cos(P.heading)))
+  assert(off < 0.6, `landing a deliberate 180 got auto-turned ${((off * 180) / Math.PI).toFixed(0)}deg back into the wall`)
+}
+
 input.throttle = 0
 console.log(`ramps ok (${RAMPS.length} rideable)`)

@@ -36,6 +36,13 @@ export const POSES = {
     fov: 30,
     player: { x: -23.0, y: 0, z: 12.0, heading: 1.2 },
   },
+  // bench close-up: the first bowl-side bench, rig parked well out of frame
+  bench: {
+    pos: [-19.9, 1.55, -1.7],
+    look: [-22.4, 0.62, -0.5],
+    fov: 28,
+    player: { x: -8.0, y: 0, z: 6.0, heading: Math.PI },
+  },
   // foliage + perimeter framing, the shot that currently reads worst
   grove: {
     pos: [-22.0, 12.0, -2.0],

@@ -7,7 +7,9 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { RoundedBox } from '@react-three/drei'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { C, M } from '../palette.js'
+import { woodMap, woodNormal, woodRough } from '../level/textures.js'
 import { PHOTO, PHOTO_TIME } from '../photo.js'
 import { TREES, SHRUBS, PLANTERS, BENCHES, LAMPS } from '../level/levelData.js'
 import { newBuckets, pushTree, pushBush, pushBed, pushBlooms } from '../level/foliage.js'
@@ -95,19 +97,45 @@ function windy(material) {
   return material
 }
 
+// white base: every clump carries its own colour, so the canopy ramp is
+// continuous rather than three discrete greens. ONE material for both leaf
+// buckets — the bed and the crown differ in GEOMETRY only, so sharing it keeps
+// them one plant family in the light rig and costs one draw call, not a second
+// shader program.
+const LEAF_MAT = foliage('#ffffff')
+
 const MAT = {
   trunk: windy(new THREE.MeshStandardMaterial({ color: C.trunk, ...M.bark })),
   branch: windy(new THREE.MeshStandardMaterial({ color: C.trunk, ...M.bark })),
-  // white base: every clump carries its own colour, so the canopy ramp is
-  // continuous rather than three discrete greens
-  foliage: foliage('#ffffff'),
-  flowerWhite: windy(new THREE.MeshStandardMaterial({ color: C.flowerWhite, roughness: 0.7 })),
-  flowerPink: windy(new THREE.MeshStandardMaterial({ color: C.flowerPink, roughness: 0.7 })),
+  foliage: LEAF_MAT,
+  crown: LEAF_MAT,
+  // vertexColors: the daisy geometry carries its yellow eye as a per-vertex
+  // multiplier (see daisy()). instanceColor still multiplies on top of it.
+  flowerWhite: windy(
+    new THREE.MeshStandardMaterial({ color: C.flowerWhite, roughness: 0.7, vertexColors: true }),
+  ),
+  flowerPink: windy(
+    new THREE.MeshStandardMaterial({ color: C.flowerPink, roughness: 0.7, vertexColors: true }),
+  ),
   flowerYellow: windy(new THREE.MeshStandardMaterial({ color: C.flowerYellow, roughness: 0.7 })),
   masonry: new THREE.MeshStandardMaterial({ color: C.wall, ...M.masonry }),
   cap: new THREE.MeshStandardMaterial({ color: C.cap, ...M.stone }),
   soil: new THREE.MeshStandardMaterial({ color: C.soil, roughness: 0.98 }),
-  wood: new THREE.MeshStandardMaterial({ color: C.benchWood, roughness: 0.72 }),
+  // Real grain, borrowed from the ramp ply (one upload — textures.js caches it)
+  // rather than a second wood canvas. The tint is NOT benchWood: it multiplies a
+  // map that already carries a mid-tan, so painting benchWood on top lands the
+  // slat two stops under its measured reading. This value was SOLVED against a
+  // capture, not derived — the map average, the grain passes and the tone curve
+  // all move it — and a sunlit seat now measures (191,153,116) against
+  // benchWood's (184,146,110). Re-measure it if the light rig moves.
+  wood: new THREE.MeshStandardMaterial({
+    color: '#9f9aa3',
+    map: woodMap(),
+    normalMap: woodNormal(),
+    normalScale: new THREE.Vector2(0.6, 0.6),
+    roughnessMap: woodRough(),
+    ...M.wood,
+  }),
   iron: new THREE.MeshStandardMaterial({ color: C.benchIron, ...M.paintedMetal }),
   lamp: new THREE.MeshStandardMaterial({ color: C.lamp, ...M.paintedMetal }),
   glass: new THREE.MeshStandardMaterial({
@@ -121,37 +149,262 @@ const MAT = {
 
 // ---------------------------------------------------------------- vegetation
 /**
- * Perfect spheres are what make procedural foliage read as clip art. One lumpy
- * sphere, plus a random 3-axis rotation per blob, means no two clumps in the
- * park share a silhouette — for the price of a single extra geometry.
+ * A foliage instance is a LEAF BLADE, not a ball.
+ *
+ * Every plant in the reference is a rosette of pointed lanceolate leaves, and
+ * no amount of lumping makes a sphere read as one — the long-running "canopy
+ * reads as a faceted boulder" fight was a sphere problem, fixed by shrinking
+ * clumps until the arcs were too small to see. A blade carries the read
+ * directly: the silhouette is a fan of points, so the grain comes from the
+ * shape rather than from the instance count.
+ *
+ * CENTRED on the origin and running along +Y, so a foliage row keeps meaning
+ * exactly what it meant before — (centre, radius) — and the aim rides the same
+ * two YXZ Euler slots a branch uses. It must be slots 6/7 only: YXZ applies the
+ * Z term FIRST, so a roll would swing the blade's own axis off the aim (that is
+ * why woody() has always written 0 there). Per-leaf variety comes from
+ * jittering the aim in foliage.js instead.
+ *
+ * 6 stations x a 6-point ring = 60 tris. It was a 4-point ring (40 tris), and
+ * the extra 20 buy the whole difference between a succulent pad and a QUARTZ
+ * SHARD: a 4-gon section is a rhombus, so the blade carries a hard crease down
+ * its spine where two faces meet at ~50 degrees, and smooth vertex normals only
+ * turn that into a hard specular LINE instead of a hard edge. A 6-gon section
+ * meets at 120 degrees and the highlight rolls across it. Both ends still pinch
+ * to a point, so the blade still needs no caps.
+ *
+ * PROFILE is an explicit table because the shape is the whole read and a smooth
+ * function cannot hold it. `sin(sqrt(t) * PI)` — the old one — peaks a quarter
+ * of the way up and then falls away for the entire rest of the leaf, so the
+ * average width is a third of W and every blade rendered as a THORN. The
+ * reference's plants are obovate: pinched at the stalk, widest PAST the middle,
+ * and rounded off rather than pointed. The round-off is the last 10% of the
+ * length, which is what makes a blunt tip out of a station that still ends at
+ * zero width and still needs no cap.
  */
-function lumpy(geo, amp, freq, seed) {
-  const g = geo.clone()
-  const p = g.attributes.position
-  const v = new THREE.Vector3()
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i)
-    const d =
-      Math.sin(v.x * freq + seed) * Math.cos(v.y * freq * 1.3 - seed) +
-      Math.sin(v.z * freq * 0.8 + seed * 1.7) * Math.cos(v.x * freq * 1.1 + seed)
-    v.multiplyScalar(1 + amp * d * 0.5)
-    p.setXYZ(i, v.x, v.y, v.z)
+// PADDLE. The previous table ([0,0],[0.06,0.35],[0.26,0.82],[0.45,1],
+// [0.66,0.9],[0.84,0.6],[0.94,0.18],[1,0]) was measured on the last capture as a
+// straight-sided SPEAR: it climbs to 82% of max width by a quarter of the
+// length, so both edges read as straight lines converging on a needle, and the
+// last two stations (18% then 0) put a sharp point on it. That is an
+// agave/yucca/holly blade, and at bed scale the points spike the silhouette
+// against the pale paving. The reference's blade is a fleshy succulent PAD:
+// convex on both edges, widest at HALF its length rather than at a fifth, and
+// blunt — the tip is a rounded cap, not a spike.
+//
+// So: a symmetric lens with a broad crest held over 0.28-0.72, and the last
+// station at 0.9 still carrying 62% of max width so the final segment closes as
+// a 52-degree cone — which at this scale renders as a rounded cap about 30% of
+// max width across, the reference's blunt tip.
+//
+// Trapezoid area 0.752 of the bounding rectangle (was 0.664), so the mean width
+// went UP 13% at a max width that came down 9% (W below) — a pad, not a spear.
+// It is also one station SHORTER (7, was 8): 72 tris a blade rather than 84, and
+// the 14% saved is what pays for the 1.6x leaf count the crowns needed.
+const PROFILE = [
+  [0, 0], [0.09, 0.55], [0.28, 0.9], [0.5, 1],
+  [0.72, 0.92], [0.9, 0.62], [1, 0],
+]
+
+// A 6-point elliptical ring per station, semi-axes (W*p) across the face and
+// (T*p) through the thickness — see the crease argument in the doc comment.
+const RING = 6
+// ...offset by half a step. At phase 0 two vertices land on the width axis and
+// NONE lands on the crest, so the top of the lens is a flat facet running the
+// whole length of the blade — the single hard longitudinal crease every blade
+// was showing, which smooth vertex normals turn into a hard specular LINE. At
+// phase 30 degrees a vertex sits on the crest (and on the back) and the pair
+// that used to sit on the width axis straddles the margin instead, which also
+// gives the leaf edge a fleshy roll rather than a knife. The cost is that the
+// face-on silhouette is now cos(30) = 0.866 of the ring's semi-axis, so W is
+// divided back out below — otherwise rotating the ring quietly narrows the blade.
+const RING_PHASE = Math.PI / RING
+const RING_K = 1 / Math.cos(RING_PHASE) // put the silhouette back where W says
+const RING_C = []
+const RING_S = []
+for (let i = 0; i < RING; i++) {
+  const a = RING_PHASE + (i / RING) * TAU
+  RING_C.push(Math.cos(a) * RING_K)
+  RING_S.push(Math.sin(a))
+}
+
+// Aspect is quoted at MAX width: 2.55 / (2*0.532) = 2.40:1 at the crest, which
+// with PROFILE's 0.752 area is 3.19:1 as a MEAN — the number the eye actually
+// integrates at play distance, in the top half of the reference's 2.5-3.5:1
+// band. W came down 0.585 -> 0.532 with the paddle reprofile above and the two
+// cancel: the last capture measured the visible blade at 2.3:1 against the
+// reference's 2.7:1, i.e. marginally too wide, and the paddle holds near max
+// width over far more of the length than the spear did — so leaving W alone
+// would have widened the READ while narrowing the shape. Do not fix a
+// fat-looking bed by narrowing W further — that gives you the rosemary the
+// crest width exists to prevent.
+//
+// T is the lever that stopped the edge-on read being a needle, and it is worth
+// more here than width is. bake() reads the aim in YXZ with the roll slot at 0,
+// so a blade's width axis is ALWAYS horizontal and perpendicular to its own
+// bearing (Ry(yaw)*Rx(tilt) leaves local +X in the ground plane) — which means
+// the ~half of a rosette aimed toward or away from the camera presents its
+// SECTION, not its face. At the old T 0.3 that section was 2.6/0.31 = 8.4:1 and
+// those blades read as spikes stuck through the plant. At 0.42 against W 0.532
+// the lens is 1.06 wide by 0.84 deep (ratio 1.27, was 1.33 — T deliberately did
+// NOT follow W down, because a succulent pad is FLESHY and the edge-on read is
+// the half of a rosette that faces the camera) and the edge-on aspect is 3.0:1.
+// `prof` defaults to the bed's pad. The tree crown passes CROWN_PROFILE — see
+// CROWN_LEAF below for why the two shapes are not allowed to converge.
+function leafBlade(W = 0.532, L = 2.55, T = 0.42, prof = PROFILE) {
+  const pos = []
+  const idx = []
+  for (let i = 0; i < prof.length; i++) {
+    const [t, p] = prof[i]
+    const w = p * W
+    // thickness tracks WIDTH, not height: a fleshy leaf is a lens in section,
+    // and the old linear taper left the widest part of the blade the flattest
+    const th = T * p
+    const y = (t - 0.42) * L // base sits behind the row point, tip reaches past it
+    const bend = t * t * 0.22 // a slight curl, so it is a leaf and not a spike
+    for (let k = 0; k < RING; k++) pos.push(RING_C[k] * w, y, bend + RING_S[k] * th)
+    if (i) {
+      const a = (i - 1) * RING
+      const b = i * RING
+      for (let k = 0; k < RING; k++) {
+        const k2 = (k + 1) % RING
+        idx.push(a + k, b + k, b + k2, a + k, b + k2, a + k2)
+      }
+    }
   }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  g.setIndex(idx)
   g.computeVertexNormals()
   return g
 }
 
-// Clumps are small and numerous, so the dent only has to break the outline —
-// the old 0.36 on a big sphere is what turned canopies into faceted boulders.
-//
-// 7x5, not 9x7. Halving the clump radius to buy canopy grain multiplied the
-// instance count by ~3 (47k clumps, 5.2M tris — the park's whole triangle
-// budget, and foliage draws twice because it casts). A clump is now 0.15 m
-// across and covers a dozen pixels at the game camera's distance, so the ring
-// count is spent on nothing; 7x5 gets the same silhouette for half the tris and
-// puts the budget back where it was.
-const SPHERE = lumpy(new THREE.SphereGeometry(1, 7, 5), 0.2, 3.4, 3.1)
-const SPHERE_LO = new THREE.SphereGeometry(1, 7, 5) // flowers stay round, they are tiny
+/**
+ * Five rounded petals round a raised pip. The blooms used to be plain spheres,
+ * which read as berries; the reference's are daisies, and five lobes is the
+ * whole difference at the four or five pixels one of these covers.
+ *
+ * The pip is a YELLOW EYE now, and it is a vertex colour rather than a second
+ * bucket: every daisy in the reference — white and pink alike — has one, and it
+ * is most of what separates a daisy from a blob of cream at chase distance. One
+ * material per bloom colour is what made this hard, but instanceColor and
+ * vertexColor BOTH multiply the material base, so the eye can ride the geometry:
+ * bake the ratio flowerYellow/flowerWhite into the pip's vertices and leave the
+ * petals at 1. Ratio taken against WHITE deliberately — the white daisy then
+ * lands on the exact yellow, and the pink one gets the same eye a stop warmer,
+ * which is what a pink daisy's centre looks like anyway.
+ */
+const _eyeA = new THREE.Color()
+const _eyeB = new THREE.Color()
+function tinted(geo, r, g, b) {
+  const n = geo.attributes.position.count
+  const col = new Float32Array(n * 3)
+  for (let i = 0; i < n; i++) {
+    col[i * 3] = r
+    col[i * 3 + 1] = g
+    col[i * 3 + 2] = b
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3))
+  return geo
+}
+
+function daisy() {
+  // both are LINEAR here (three converts on set), which is the space
+  // instanceColor/vertexColor multiply in
+  _eyeA.set(C.flowerYellow)
+  _eyeB.set(C.flowerWhite)
+  const er = Math.min(1, _eyeA.r / Math.max(_eyeB.r, 0.02))
+  const eg = Math.min(1, _eyeA.g / Math.max(_eyeB.g, 0.02))
+  const eb = Math.min(1, _eyeA.b / Math.max(_eyeB.b, 0.02))
+  const petal = new THREE.SphereGeometry(0.5, 6, 4).scale(1, 0.4, 1)
+  const parts = []
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * TAU
+    parts.push(tinted(petal.clone().translate(Math.cos(a) * 0.6, 0, Math.sin(a) * 0.6), 1, 1, 1))
+  }
+  // the eye is proud of the petals, or from a 40-degree camera it is hidden by
+  // whichever petal is nearest
+  parts.push(
+    tinted(new THREE.SphereGeometry(0.4, 6, 4).scale(1, 0.62, 1).translate(0, 0.2, 0), er, eg, eb),
+  )
+  return mergeGeometries(parts)
+}
+
+/**
+ * A tight KNOT of beads, for the yellow.
+ *
+ * The reference's dominant flower is not a daisy at all — the white and pink
+ * five-petal heads are the accent, and what actually reads from across the bed
+ * is a cluster of small yellow buds sitting on top of a rosette, like a head of
+ * broccoli. Baking that as one geometry rather than scattering N daisies is what
+ * keeps the knot tight: pushBlooms' own scatter is 0.2m wide, which at this
+ * scale is a spray, not a knot.
+ *
+ * THREE beads on a tight ring plus one crown bead, not four plus one. The last
+ * capture measured a finished knot at ~0.85 blade-widths across against the
+ * reference's ~0.54, and 10-14 beads in an elongated string — raspberries and
+ * corn cobs sitting ON TOP of the foliage. Two thirds of that was pushBlooms
+ * stacking 2-3 of these per cluster (it emits ONE now); the rest is here. Three
+ * ring beads at 0.30 against a 0.5 bead overlap by four fifths, so the knot is a
+ * single lumpy BALL with three countable lobes rather than a ring of pellets,
+ * and its bounding radius is 0.80 where the four-bead ring was 0.84.
+ * 4 beads at 36 tris is 144, under the daisy's 216.
+ */
+function budCluster() {
+  const bead = (r) => new THREE.SphereGeometry(r, 6, 4)
+  const parts = []
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * TAU + 0.5
+    parts.push(bead(0.5).translate(Math.cos(a) * 0.3, (i % 2) * 0.1, Math.sin(a) * 0.3))
+  }
+  parts.push(bead(0.52).translate(0, 0.26, 0))
+  return mergeGeometries(parts)
+}
+
+/**
+ * The TREE crown's blade, and it is deliberately NOT the bed's.
+ *
+ * The bed (pushBed / pushBush -> the `foliage` bucket) was signed off as it
+ * stands: a fleshy succulent PAD, blunt-tipped, W 0.532. The crowns were not —
+ * "bushes look good, trees really bad, make the tree leaves thinner" — because
+ * at chase distance a 0.532-wide pad rounded at BOTH ends reads as a green
+ * jellybean stuck on a stick, and forty of them read as forty jellybeans. A tree
+ * leaf is a different organ from a succulent rosette leaf and it has to be a
+ * different mesh; the temptation to unify the two shapes is what produced the
+ * jellybean crown in the first place.
+ *
+ * Two changes, and both are needed — narrowing alone leaves a stubby tic-tac:
+ *
+ * WIDTH 0.532 -> 0.32 (0.60x). Aspect at the crest goes 2.40:1 -> 4.0:1, and
+ * with CROWN_PROFILE's 0.665 mean-to-max the MEAN aspect — the number the eye
+ * integrates at play distance — goes 3.19:1 -> 5.4:1.
+ *
+ * TIP. The bed's PROFILE carries 62% of max width at t=0.9 and closes over the
+ * last 10% of the length, which is a 52-degree cone, i.e. a rounded CAP. That is
+ * the blunt end the brief is about. CROWN_PROFILE holds 72% at t=0.75 and
+ * closes over the last QUARTER — a 20-degree cone, a real point — and it is
+ * lanceolate rather than symmetric (widest at 0.46, not 0.50) so the leaf has a
+ * shoulder and a taper instead of two identical ends.
+ *
+ * T 0.42 -> 0.26 tracks W down at very nearly the same ratio (0.81 vs 0.79): the
+ * roll slot is 0, so a blade's width axis is always horizontal and about half of
+ * any mass presents its SECTION rather than its face. Holding T at the bed's
+ * value while W came down 40% would have made the crown read FATTER edge-on than
+ * the pad it replaced, on half the leaves.
+ *
+ * 6 stations, not 7 (60 tris a blade against the bed pad's 72). Coverage is held
+ * by count (foliage.js massClumps x1.61) and the 17% saved per blade is most of
+ * what pays for it: the park's crown rows go 75k -> ~121k for 5.4M -> 7.3M tris
+ * in the same two draw calls.
+ */
+const CROWN_PROFILE = [
+  [0, 0], [0.1, 0.5], [0.28, 0.92], [0.46, 1], [0.75, 0.72], [1, 0],
+]
+
+const LEAF = leafBlade()
+const CROWN_LEAF = leafBlade(0.32, 2.55, 0.26, CROWN_PROFILE)
+const BLOOM = daisy()
+const BUDS = budCluster()
 
 // Woody segments are UNIT cylinders anchored at their base, so a row's scale is
 // (radius, length, radius) and its two rotation terms aim it. Anchoring at the
@@ -166,9 +419,12 @@ const BRANCH = woodyGeo(0.42, 6)
 const BUCKET_GEO = {
   trunk: TRUNK,
   branch: BRANCH,
-  flowerWhite: SPHERE_LO,
-  flowerPink: SPHERE_LO,
-  flowerYellow: SPHERE_LO,
+  // bed and bush stay on LEAF (bake's fallback); a tree crown is CROWN_LEAF
+  crown: CROWN_LEAF,
+  flowerWhite: BLOOM,
+  flowerPink: BLOOM,
+  // yellow is the bud knot, not a daisy — see budCluster
+  flowerYellow: BUDS,
 }
 
 const _o = new THREE.Object3D()
@@ -176,7 +432,7 @@ const _col = new THREE.Color()
 
 function bake(key, rows, receive) {
   const mat = MAT[key]
-  const mesh = new THREE.InstancedMesh(BUCKET_GEO[key] || SPHERE, mat, rows.length)
+  const mesh = new THREE.InstancedMesh(BUCKET_GEO[key] || LEAF, mat, rows.length)
   for (let i = 0; i < rows.length; i++) {
     const e = rows[i]
     _o.position.set(e[0], e[1], e[2])
@@ -202,7 +458,7 @@ function bake(key, rows, receive) {
   }
   mesh.instanceMatrix.needsUpdate = true
   mesh.instanceColor.needsUpdate = true
-  mesh.castShadow = key === 'trunk' || key === 'branch' || key === 'foliage'
+  mesh.castShadow = key === 'trunk' || key === 'branch' || key === 'foliage' || key === 'crown'
   mesh.receiveShadow = receive
   return mesh
 }
@@ -358,21 +614,52 @@ export function Planters() {
   const buckets = useMemo(() => {
     const b = newBuckets()
     PLANTERS.forEach((p, i) => {
-      const rnd = prng(7331 + i * 613)
+      // TWO streams per planter, and the split is a bug fix, not tidying. There
+      // used to be one `rnd` handed to pushTree FIRST and pushBed second, so the
+      // bed's draw started at whatever offset the tree happened to leave the
+      // sequence at — and a tree edit is always a change to how many values the
+      // tree consumes. Raising the crown clump counts therefore RE-RANDOMISED
+      // every rosette, berry knot and daisy in every planted bed: a pixel diff
+      // of that round measured the static planter frame at 1.5% changed and the
+      // bed interior at 50-69%, on tables that were byte-identical. The lawn
+      // trees and lawn shrubs were never exposed to this — they already take a
+      // per-instance stream — so only the planters could be hit, and they were.
+      //
+      // Same seed base for the bed as the old shared stream, now dedicated: the
+      // bed is drawn from offset 0 and no tree change can reach it again.
+      const bedRnd = prng(7331 + i * 613)
+      const treeRnd = prng(8101 + i * 613)
       const soil = (p.base || 0) + p.h + 0.01
       // inner rectangle: the bed the stone lip frames
       const iw = Math.max(0.6, p.w - LIP * 2)
       const id = Math.max(0.6, p.d - LIP * 2)
       if (p.plant === 'tree') {
-        pushTree(b, p.x, soil, p.z, 0.92, rnd() * TAU, rnd)
+        // 'blossom' by NAME, not by draw. A planter tree used to take a random
+        // species, and two thirds of the time that is broadleaf or slim — both
+        // of which are LAWN trees, with a 2.5-3.4m trunk. In a 1.4m planter that
+        // renders as a tall narrow cone on a pole, which is what the last
+        // capture showed and the opposite of the reference's low wide flowering
+        // tree standing in its own bed. blossom is the species that shape was
+        // authored for (trunkH 2.0, the widest branch tilt and the biggest core)
+        // and it is the one that carries the pink crown speckle densest.
+        pushTree(b, p.x, soil, p.z, 0.92, treeRnd() * TAU, treeRnd, 'blossom')
         // Under-planting, not a ring of shrubs on bare earth. `hole` keeps the
         // trunk clear; without it the tree looks like it is growing out of a
         // hedge rather than standing in one.
-        pushBed(b, p.x, soil, p.z, iw, id, rnd, 1, { fill: 0.9, rise: 0.3, hole: 0.42 })
-        pushBlooms(b, p.x, soil, p.z, iw, id, rnd, 1, { per: 0.9, rise: 0.3 })
+        const sites = pushBed(b, p.x, soil, p.z, iw, id, bedRnd, 1, {
+          fill: 0.9, rise: 0.3, hole: 0.42,
+        })
+        // 0.9 -> 2.6 -> 11 -> 5.8. This was set when the bed under a tree was thought
+        // of as quiet ground cover; in the reference the tree's own bed carries
+        // the DENSEST yellow in the frame (4.5% of those pixels against the
+        // plain bed's 2.9%), and at 0.9 a 3m planter was rendering about four
+        // knots total. `sites` seats every one of them on a rosette.
+        // 5.8 -> 10.1, the same 1.74x the plain bed's default took when the knot
+        // came down to a third of its area — see pushBlooms.
+        pushBlooms(b, p.x, soil, p.z, iw, id, bedRnd, 1, { per: 10.1, rise: 0.3, sites })
       } else {
-        pushBed(b, p.x, soil, p.z, iw, id, rnd)
-        pushBlooms(b, p.x, soil, p.z, iw, id, rnd)
+        const sites = pushBed(b, p.x, soil, p.z, iw, id, bedRnd)
+        pushBlooms(b, p.x, soil, p.z, iw, id, bedRnd, 1, { sites })
       }
     })
     return b
@@ -432,10 +719,37 @@ export function Planters() {
 }
 
 // ---------------------------------------------------------------- benches
-const SEAT_SLAT = new RoundedBoxGeometry(1.72, 0.095, 0.17, 2, 0.042)
-const BACK_SLAT = new RoundedBoxGeometry(1.72, 0.17, 0.09, 2, 0.042)
-const BAR = new THREE.CylinderGeometry(0.044, 0.044, 1, 10)
-const ARM_CURL = new THREE.TorusGeometry(0.11, 0.032, 6, 12, Math.PI / 2)
+// A slat is one board, so its grain must run along its LENGTH — woodMap paints
+// planks along canvas v, so v = local x and u = the short axis.
+//
+// It rides ONE plank of the seven, and which one is measured, not picked: 6 is
+// the darkest tone in the tile (RAMP.wood at 0.20), and a slat is parked on its
+// CENTRE with only ±0.04 canvas of span, or the black plank-edge line would run
+// as a groove down the middle of every slat. v starts just past that plank's
+// butt seam (0.459) so the seam falls off the end: the slat spans 0.83 canvas,
+// leaves 0.17 of slack, and one seam per slat lands in the SAME place on all
+// seven — a straight crack across the whole bench.
+const WOOD_K = 0.12
+const WOOD_U = 0.9286 / 4 // canvas u 0.929 = the centre of plank 6
+const WOOD_V = 0.539 / 4 // canvas v 0.539 = clear of plank 6's butt seam (0.459)
+const slatGeo = (len, h, d, across) => {
+  const g = new RoundedBoxGeometry(len, h, d, 3, 0.042)
+  const pos = g.attributes.position
+  const uv = g.attributes.uv
+  for (let i = 0; i < uv.count; i++) {
+    const a = across === 1 ? pos.getY(i) : pos.getZ(i)
+    uv.setXY(i, WOOD_U + a * WOOD_K, WOOD_V + (pos.getX(i) + len / 2) * WOOD_K)
+  }
+  uv.needsUpdate = true
+  return g
+}
+const SEAT_SLAT = slatGeo(1.72, 0.095, 0.17, 2)
+const BACK_SLAT = slatGeo(1.72, 0.17, 0.09, 1)
+const BAR = new THREE.CylinderGeometry(0.044, 0.044, 1, 16)
+const ARM_CURL = new THREE.TorusGeometry(0.11, 0.032, 10, 18, Math.PI / 2)
+// bolt heads where each slat meets the frame, and pads under the legs
+const BOLT = new THREE.CylinderGeometry(0.019, 0.023, 0.013, 10)
+const FOOT = new THREE.CylinderGeometry(0.062, 0.07, 0.022, 12)
 
 const SEAT_Z = [-0.26, -0.09, 0.08, 0.25]
 const BACK_Y = [0.54, 0.68, 0.82]
@@ -453,6 +767,16 @@ const benchFrame = (side) => {
     iron([x, 0.66, -0.32], [BACK_TILT, 0, 0], [1, 0.56, 1]),
     iron([x, 0.66, -0.05], [Math.PI / 2, 0, 0], [1, 0.5, 1]),
     { geo: ARM_CURL, mat: MAT.iron, pos: [x, 0.55, 0.11], rot: [0, -Math.PI / 2, 0] },
+    { geo: FOOT, mat: MAT.iron, pos: [x, 0.011, 0.22] },
+    { geo: FOOT, mat: MAT.iron, pos: [x, 0.011, -0.26] },
+    // one bolt per slat end, sitting just proud of the wood
+    ...SEAT_Z.map((z) => ({ geo: BOLT, mat: MAT.iron, pos: [x, 0.466, z] })),
+    ...BACK_Y.map((y) => ({
+      geo: BOLT,
+      mat: MAT.iron,
+      pos: [x, y, -0.253 + (y - 0.54) * BACK_TILT],
+      rot: [Math.PI / 2 + BACK_TILT, 0, 0],
+    })),
   ]
 }
 

@@ -114,7 +114,8 @@ three.js (MIT) on purpose — drei's default decoder path is a CDN, and nothing
 here fetches over the network. `public/fonts/LuckiestGuy-Regular.ttf` is under
 the SIL Open Font License, vendored for the same reason.
 
-`public/boy.glb`, `public/dog_compressed.glb`, `public/songs/*.mp3` and
+`public/boy.glb`, `public/dog_compressed.glb`,
+`public/songs/*.mp3` and
 `ref/*.png` are **not** covered by this project's licence — see below.
 
 ## Licence

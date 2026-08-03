@@ -49,8 +49,11 @@ const boneMat = new THREE.MeshPhysicalMaterial({
   emissiveIntensity: 0.18,
 })
 
-const R2 = 1.1 * 1.1 // collect radius on the body centre (P.pos + 0.45 up)
-const POP = 0.6 // seconds of collect animation
+// Exported: Letters.jsx collects on exactly these. A second collectible with
+// its own radius would feel like a different game rule for no reason, and the
+// difference would be invisible until someone measured it.
+export const R2 = 1.1 * 1.1 // collect radius on the body centre (P.pos + 0.45 up)
+export const POP = 0.6 // seconds of collect animation
 
 function collect(g) {
   const game = useGame.getState()

@@ -19,6 +19,7 @@ const TRAIL_N = 40
 const STAR_N = 40 // grind sparkle stream + trick bursts share this pool
 const RING_N = 12
 const STREAK_N = 40
+const TRASH_N = 44 // ~10 scraps per can, so two cans in quick succession fit
 const TAU = Math.PI * 2
 
 const dustGeo = new THREE.SphereGeometry(1, 8, 6)
@@ -84,6 +85,12 @@ const ringMat = new THREE.MeshBasicMaterial({
   side: THREE.DoubleSide,
 })
 
+// Litter: a flat crumpled scrap. LIT, not toneMapped-off like the sparks — a
+// bit of rubbish is a real object in the park and has to sit in the same light
+// as the can it came out of, or it reads as another particle effect.
+const trashGeo = new THREE.BoxGeometry(1, 0.72, 0.12)
+const trashMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85, flatShading: true })
+
 const streakGeo = new THREE.BoxGeometry(0.03, 0.03, 1)
 const streakMat = new THREE.MeshBasicMaterial({
   color: '#ffffff',
@@ -98,6 +105,13 @@ const asRGB = (hexes) => hexes.map((h) => new THREE.Color(h).convertSRGBToLinear
 const SPARK_COLS = asRGB(['#ffe14d', '#ff9d2e', '#ff5da2', '#4dd8ff', '#ffffff'])
 const STAR_COLS = asRGB(['#ffd94d', '#ffb347', '#ff6fb5', '#7de8ff'])
 const GOLD = asRGB(['#ffe14d', '#ffd94d', '#fff3b0', '#ffb347'])
+// the can's own paint — enamel teal, galvanised rim, the warm band, plus a
+// white hot flash so the burst still reads against the teal plaza shadows
+const CAN_COLS = asRGB(['#4f7f79', '#a9c4bf', '#e8a253', '#ffffff'])
+// what's actually in the bin: newspaper, cardboard, a squashed soda can, a
+// banana skin, a green bottle, a pink wrapper. Read as ALBEDO (the material is
+// lit), so these are the paints, not glow values.
+const TRASH_COLS = asRGB(['#f2ece0', '#c99a63', '#e05a4d', '#f2d24b', '#6fae63', '#f08bbd'])
 // full hue wheel for grind sparkles, kept light so every hue reads on concrete
 const RAINBOW = Array.from({ length: 12 }, (_, i) =>
   new THREE.Color().setHSL(i / 12, 1, 0.62).convertSRGBToLinear())
@@ -121,6 +135,11 @@ const trail = pool(TRAIL_N, true)
 const star = pool(STAR_N, false, true)
 const ring = pool(RING_N, true)
 const streak = pool(STREAK_N, true)
+// q holds (axis.x, axis.y, axis.z, spin rate) and `rot` accumulates the phase —
+// a scrap tumbles about one fixed random axis, which is what a flat thing
+// thrown into the air does. A second quaternion per instance would be a second
+// integration to keep stable for nothing.
+const trash = pool(TRASH_N, true, true)
 
 const _o = new THREE.Object3D()
 const _v = new THREE.Vector3()
@@ -218,6 +237,81 @@ function ringAt(x, y, z, size) {
   _q.setFromUnitVectors(YUP, _up.copy(P.up).normalize())
   const i = alloc(ring, x, y, z, 0, 0, 0, 0.35, size)
   _q.toArray(ring.q, i * 4)
+}
+
+// All-gold celebration burst: star fountain + spark scatter + surface
+// shockwave. Shared by 'bone' and 'goal' — a challenge should read like the
+// last bone did, not invent a second reward language.
+function goldBurst(pos, big) {
+  const n = (big ? 18 : 11) >> (isLow() ? 1 : 0)
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU + rnd(0.3)
+    const cx = Math.cos(a)
+    const cz = Math.sin(a)
+    starAt(pos.x + cx * 0.18, pos.y + rnd(0.15), pos.z + cz * 0.18,
+      cx * (1.2 + Math.random()), 1.3 + Math.random() * 1.7, cz * (1.2 + Math.random()),
+      0.08 + Math.random() * 0.06, GOLD)
+    if (i % 2 === 0) sparkAt(pos.x, pos.y, pos.z, cx * 0.4, cz * 0.4, 0.6, GOLD)
+  }
+  ringAt(pos.x, pos.y, pos.z, big ? 0.8 : 0.5)
+}
+
+// Rubbish out of a smashed can: thrown UP out of the mouth first and only then
+// carried along travel, because a can that sprays its contents flat looks like
+// it exploded rather than like it was knocked over.
+function trashAt(x, y, z, dx, dz, k) {
+  const a = Math.random() * TAU
+  const spread = 0.5 + Math.random() * 1.5
+  const i = alloc(
+    trash,
+    x + Math.cos(a) * 0.2, y + 0.5 + Math.random() * 0.4, z + Math.sin(a) * 0.2,
+    Math.cos(a) * spread + dx * k, 2.6 + Math.random() * 2.4, Math.sin(a) * spread + dz * k,
+    0.9 + Math.random() * 0.7,
+    0.1 + Math.random() * 0.1,
+  )
+  // tumble axis: any direction, biased off vertical so the scrap flashes its
+  // face at the camera instead of spinning edge-on like a coin
+  const ax = rnd(1), ay = rnd(0.5), az = rnd(1)
+  const l = Math.hypot(ax, ay, az) || 1
+  trash.q[i * 4] = ax / l
+  trash.q[i * 4 + 1] = ay / l
+  trash.q[i * 4 + 2] = az / l
+  trash.q[i * 4 + 3] = 6 + Math.random() * 8
+  setCol(trash, i, TRASH_COLS)
+}
+
+function stepTrash(mesh, dt) {
+  const drag = Math.exp(-0.9 * dt)
+  for (let i = 0; i < TRASH_N; i++) {
+    const a = trash.life[i] - dt
+    if (a <= 0) {
+      trash.life[i] = 0
+      mesh.setMatrixAt(i, ZERO)
+      continue
+    }
+    trash.life[i] = a
+    trash.vy[i] -= 9 * dt // paper falls slower than the 22 the player gets
+    trash.vx[i] *= drag
+    trash.vz[i] *= drag
+    trash.x[i] += trash.vx[i] * dt
+    trash.y[i] += trash.vy[i] * dt
+    trash.z[i] += trash.vz[i] * dt
+    trash.rot[i] += trash.q[i * 4 + 3] * dt
+
+    const f = a / trash.max[i]
+    _v.set(trash.q[i * 4], trash.q[i * 4 + 1], trash.q[i * 4 + 2])
+    _q.setFromAxisAngle(_v, trash.rot[i])
+    _o.quaternion.copy(_q)
+    _o.position.set(trash.x[i], trash.y[i], trash.z[i])
+    // no ground test — the park is uneven and a scrap that asks the level
+    // where the floor is costs a raycast per piece per frame. It shrinks out
+    // in the last third instead, which lands about when it would have.
+    _o.scale.setScalar(trash.size[i] * Math.min(1, f / 0.33))
+    _o.updateMatrix()
+    mesh.setMatrixAt(i, _o.matrix)
+  }
+  mesh.instanceMatrix.needsUpdate = true
+  pushColors(mesh, trash)
 }
 
 function streakAt() {
@@ -445,6 +539,7 @@ export default function Effects() {
   const starRef = useRef()
   const ringRef = useRef()
   const streakRef = useRef()
+  const trashRef = useRef()
   const t = useRef({ dust: 0, spark: 0, trail: 0, streak: 0, grindT: 0, grindStar: 0, airStar: 0, bigAir: false })
 
   // Must be a layout effect: useFrame subscribes in a layout effect too, so a
@@ -452,12 +547,12 @@ export default function Effects() {
   // three only reads `usage` when it first creates the buffer, so setting it
   // late would silently leave these buffers as STATIC_DRAW forever.
   useLayoutEffect(() => {
-    for (const m of [dustRef.current, sparkRef.current, trailRef.current, starRef.current, ringRef.current, streakRef.current]) {
+    for (const m of [dustRef.current, sparkRef.current, trailRef.current, starRef.current, ringRef.current, streakRef.current, trashRef.current]) {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     }
     // instanceColor is created lazily by setColorAt, but we write the whole
     // buffer ourselves — so create it up front with dynamic usage.
-    for (const [m, p] of [[sparkRef.current, spark], [starRef.current, star]]) {
+    for (const [m, p] of [[sparkRef.current, spark], [starRef.current, star], [trashRef.current, trash]]) {
       m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(p.n * 3).fill(1), 3)
       m.instanceColor.setUsage(THREE.DynamicDrawUsage)
     }
@@ -503,20 +598,32 @@ export default function Effects() {
         const n = Math.min(8, 3 + Math.round(points / 150))
         starBurst(P.pos, isLow() ? Math.ceil(n / 2) : n, 1.6)
       }),
-      on('bone', ({ pos, big }) => {
-        // all-gold burst: star fountain + spark scatter + surface shockwave
-        const n = (big ? 18 : 11) >> (isLow() ? 1 : 0)
+      on('bone', ({ pos, big }) => goldBurst(pos, big)),
+      // Smashing a can is an IMPACT, not a pickup: grit and paint chips thrown
+      // along travel, a ground shockwave, and only a couple of stars so it
+      // doesn't borrow the gold reward language a bone owns.
+      on('smash', ({ pos, dir, speed = 8 }) => {
+        const k = Math.min(1.5, 0.6 + speed / 12)
+        const dx = dir ? dir.x : -Math.sin(P.heading)
+        const dz = dir ? dir.z : -Math.cos(P.heading)
+        const l = Math.hypot(dx, dz) || 1
+        const n = isLow() ? 7 : 16
         for (let i = 0; i < n; i++) {
-          const a = (i / n) * TAU + rnd(0.3)
-          const cx = Math.cos(a)
-          const cz = Math.sin(a)
-          starAt(pos.x + cx * 0.18, pos.y + rnd(0.15), pos.z + cz * 0.18,
-            cx * (1.2 + Math.random()), 1.3 + Math.random() * 1.7, cz * (1.2 + Math.random()),
-            0.08 + Math.random() * 0.06, GOLD)
-          if (i % 2 === 0) sparkAt(pos.x, pos.y, pos.z, cx * 0.4, cz * 0.4, 0.6, GOLD)
+          // chips fan forward around the travel direction, not a full sphere
+          const a = Math.atan2(dz / l, dx / l) + rnd(1.1)
+          sparkAt(pos.x, pos.y + 0.4 + Math.random() * 0.5, pos.z, Math.cos(a) * 0.55 * k, Math.sin(a) * 0.55 * k, 0.8, CAN_COLS)
+          if (i % 2 === 0) puff(pos.x + rnd(0.3), pos.y + 0.15, pos.z + rnd(0.3), Math.cos(a) * 1.6, 0.7, Math.sin(a) * 1.6, 1.15)
         }
-        ringAt(pos.x, pos.y, pos.z, big ? 0.8 : 0.5)
+        for (let i = 0; i < (isLow() ? 2 : 4); i++) {
+          const a = (i / 4) * TAU
+          starAt(pos.x + Math.cos(a) * 0.25, pos.y + 0.7, pos.z + Math.sin(a) * 0.25,
+            Math.cos(a) * 1.4, 1.6 + Math.random(), Math.sin(a) * 1.4, 0.09, CAN_COLS)
+        }
+        for (let i = 0; i < (isLow() ? 5 : 10); i++) trashAt(pos.x, pos.y, pos.z, dx / l, dz / l, 1.6 * k)
+        ringAt(pos.x, pos.y + 0.03, pos.z, 0.65 * k)
       }),
+      // a completed challenge reads like the last bone: same gold, biggest ring
+      on('goal', ({ pos }) => goldBurst(pos, true)),
       on('bigair', ({ pos }) => {
         // rainbow halo burst, then the frame loop streams sparkles until landing
         t.current.bigAir = true
@@ -648,6 +755,7 @@ export default function Effects() {
     stepStars(starRef.current, dt, state.camera.quaternion)
     stepRings(ringRef.current, dt)
     stepStreaks(streakRef.current, dt)
+    stepTrash(trashRef.current, dt)
   })
 
   return (
@@ -658,6 +766,8 @@ export default function Effects() {
       <instancedMesh ref={streakRef} args={[streakGeo, streakMat, STREAK_N]} frustumCulled={false} renderOrder={3} />
       <instancedMesh ref={sparkRef} args={[sparkGeo, sparkMat, SPARK_N]} frustumCulled={false} renderOrder={4} />
       <instancedMesh ref={starRef} args={[starGeo, starMat, STAR_N]} frustumCulled={false} renderOrder={5} />
+      {/* litter casts — it is lit park furniture for a second, not a sparkle */}
+      <instancedMesh ref={trashRef} args={[trashGeo, trashMat, TRASH_N]} frustumCulled={false} castShadow />
     </>
   )
 }

@@ -219,6 +219,72 @@ function sfxShimmer() {
   s.start(t, Math.random() * 2); s.stop(t + 0.75); v.add(s, f, ng)
 }
 
+// Clearing a SET (all five bones, all five cans) — the two moments a run has
+// that are the last of a series rather than one more of one. Every goal already
+// gets shimmer + chime, so this has to be bigger than that or it isn't a
+// celebration: a rising major arpeggio that ARRIVES on a held triad, over a
+// filtered-noise swell that reads as a cheer. One voice for the whole thing —
+// the pool is 8 and a ten-note fanfare taken one voice per note would evict
+// itself halfway through.
+function sfxFanfare() {
+  if (!ctx) return
+  const t = ctx.currentTime, v = voice(2.2)
+  const NOTES = [523, 659, 784, 1047]
+  NOTES.forEach((hz, i) => {
+    const t0 = t + i * 0.11
+    const dec = i === NOTES.length - 1 ? 1.4 : 0.28 // stabs, then the top rings
+    const g = gn(0)
+    env(g.gain, t0, 0.15, 0.02, dec)
+    g.connect(v.g); v.add(g)
+    for (const [type, det, lvl] of [['triangle', -6, 1], ['square', 7, 0.3]]) {
+      const o = osc(type, hz, det), og = gn(lvl)
+      o.connect(og); og.connect(g)
+      o.start(t0); o.stop(t0 + 0.05 + dec); v.add(o, og)
+    }
+  })
+  // the triad lands under the last note, not with the first: an arpeggio that
+  // is already a chord has nowhere to go
+  for (const hz of [523, 659, 784]) {
+    const t0 = t + 0.33, o = osc('sine', hz, 4), g = gn(0)
+    env(g.gain, t0, 0.07, 0.06, 1.2)
+    o.connect(g); g.connect(v.g); o.start(t0); o.stop(t0 + 1.4); v.add(o, g)
+  }
+  const s = noise(false, false), f = flt('bandpass', 1700, 0.7), ng = gn(0)
+  env(ng.gain, t, 0.085, 0.25, 0.85) // slow attack — a cheer swells, it doesn't hit
+  s.connect(f); f.connect(ng); ng.connect(v.g)
+  s.start(t, Math.random() * 2); s.stop(t + 1.2); v.add(s, f, ng)
+}
+
+// Bin clang: an empty steel drum is INHARMONIC — equal-tempered partials read
+// as a bell and a bell reads as a reward, which is exactly what a smash is
+// not. Ratios below are stretched off any interval, over a bright noise crash
+// and a low body thunk, then a short clatter tail so the wreck keeps rolling
+// while the debris is still in the air.
+function sfxSmash(e) {
+  if (!ctx) return
+  const k = Math.min(1, ((e && e.speed) || 8) / 13)
+  const t = ctx.currentTime, v = voice(1.0)
+  ;[1, 1.51, 2.13, 2.77, 3.61].forEach((r, i) => {
+    const o = osc(i > 2 ? 'square' : 'triangle', 190 * r), g = gn(0)
+    env(g.gain, t, (0.13 - i * 0.018) * (0.6 + k * 0.6), 0.003, 0.24 + i * 0.06)
+    o.connect(g); g.connect(v.g); o.start(t); o.stop(t + 0.6); v.add(o, g)
+  })
+  const s = noise(false, false), f = flt('bandpass', 3200, 0.8), ng = gn(0)
+  env(ng.gain, t, 0.16 * (0.5 + k), 0.002, 0.16)
+  s.connect(f); f.connect(ng); ng.connect(v.g); s.start(t, Math.random() * 2); s.stop(t + 0.3)
+  const o = osc('sine', 150), og = gn(0)
+  o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(60, t + 0.14)
+  env(og.gain, t, 0.22 * (0.5 + k), 0.004, 0.16)
+  o.connect(og); og.connect(v.g); o.start(t); o.stop(t + 0.35)
+  v.add(s, f, ng, o, og)
+  for (let i = 0; i < 3; i++) { // clatter: the drum bouncing away
+    const t0 = t + 0.22 + i * (0.11 + Math.random() * 0.07)
+    const o2 = osc('triangle', 260 * (1 + Math.random() * 0.9)), g2 = gn(0)
+    env(g2.gain, t0, 0.07 / (i + 1), 0.003, 0.09)
+    o2.connect(g2); g2.connect(v.g); o2.start(t0); o2.stop(t0 + 0.14); v.add(o2, g2)
+  }
+}
+
 function sfxBail() {
   if (!ctx) return
   const t = ctx.currentTime, v = voice(0.9)
@@ -299,6 +365,17 @@ export function startAudio() {
   unsubs.push(
     on('jump', sfxJump), on('land', sfxLand), on('trick', sfxTrick), on('bail', sfxBail),
     on('bone', ({ big }) => sfxTrick({ points: big ? 2500 : 700 })),
+    // clang first, then the score chime under it — the impact has to land
+    // before the reward or it reads as a pickup
+    on('smash', (e) => { sfxSmash(e); sfxTrick({ points: 300 }) }),
+    // a challenge gets the shimmer AND the fanfare — it's the biggest single
+    // thing that happens in a run and it has to sound like it
+    on('goal', ({ id }) => {
+      sfxShimmer()
+      sfxTrick({ points: 2500 })
+      // 'fetch' = all 5 bones, 'cans' = all 5 smashed — the two set-clears
+      if (id === 'fetch' || id === 'cans') sfxFanfare()
+    }),
     on('bigair', sfxShimmer),
     on('grind', (e) => {
       const active = !!(e && e.on)

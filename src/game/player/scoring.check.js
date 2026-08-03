@@ -74,10 +74,10 @@ assert.equal(useGame.getState().combo, 0, 'rolling between tricks must end the c
 
 // 5. pool gap: fly across the bowl and land clear of the rim, vs the same air
 // dropped INTO the bowl — only the first pays. Bowl is r~5.85 at (-15, -4).
-function flyAcross(vx, vy) {
+function flyAcross(vx, vy, from = [-9, 0.3, -1]) {
   resetPlayer()
   useGame.setState({ score: 0, combo: 0 })
-  P.pos.set(-9, 0.3, -1)
+  P.pos.set(...from)
   P.vel.set(vx, vy, 0)
   P.heading = -Math.PI / 2
   P.state = 'air'
@@ -94,5 +94,12 @@ function flyAcross(vx, vy) {
 
 assert.match(flyAcross(-14, 8.5), /Pool Gap/, 'clearing the bowl must pay a gap bonus')
 assert.doesNotMatch(flyAcross(-6, 3), /Pool Gap/, 'dropping INTO the bowl is not a gap')
+// ...and neither is popping out of the bowl you were already in: the air starts
+// at k<0.7, so without the leftPool arming an ollie off the flat bottom paid it.
+assert.doesNotMatch(
+  flyAcross(15, 11, [-15, -1.5, -4]), // out of the deep end, lands k~1.9 clear
+  /Pool Gap/,
+  'jumping out of the bowl is not a gap — the line has to cross the hole',
+)
 
 console.log('scoring ok')

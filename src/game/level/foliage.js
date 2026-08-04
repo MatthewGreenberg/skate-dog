@@ -17,6 +17,7 @@
 
 import * as THREE from 'three'
 import { C, LIGHT } from '../palette.js'
+import { F } from '../foliageKnobs.js'
 
 const TAU = Math.PI * 2
 
@@ -42,7 +43,7 @@ const SUN_Z = LIGHT.sunDir[2] / SUN_H
 // the only term that can push a clump onto it is the one that knows which way
 // the clump faces. leafMass's base drops 0.36 -> 0.32 to pay for it, so the sum
 // still tops out at 0.996 rather than clamping (see the hN comment there).
-const SUN_FACE = 0.22
+// Live value: F.sunFace (default 0.22) — the knob owns it now, see foliageKnobs.js.
 
 /**
  * Species tables.
@@ -84,7 +85,7 @@ export const SPECIES = {
     branchTilt: [0.62, 1.02], // radians off vertical
     branchR: 0.085,
     mass: [0.72, 0.94], // leaf-mass radius at a branch tip
-    massClumps: [108, 138], // x1.61, see clumpR below
+    massClumps: [78, 99], // x1.61 then x0.72, see clumpR below
     // COUNT and SIZE both moved once the crown aim went tangential (leafMass),
     // and the direction is the opposite of what it looks like. A radially-aimed
     // blade presents its TIP to the silhouette, so a handful of them fills a
@@ -123,7 +124,18 @@ export const SPECIES = {
     // Net n*w*l per mass: 1.61 * 1.166 * 0.532 = 0.999, i.e. coverage held to
     // within a percent while every blade is 40% narrower. Grain ratio 0.234
     // (limit 0.32), solid 6.7.
-    clumpR: [0.158, 0.230],
+    //
+    // ...and then a straight PERFORMANCE trim, the one move in this history
+    // that is not about the read. The park was drawing 122k crown rows at 60
+    // tris = 7.3M triangles, ~80% of all foliage. Two levers, applied to all
+    // three species: massClumps x0.72 and clumpR x1.18, which holds coverage
+    // (n*r^2: 0.72 * 1.392 = 1.002) because the blade is a fixed shape scaled by
+    // r — the SAME trade the x1.61/x1.08 pass above made, run backwards. Crown
+    // rows 122k -> 88k; with CROWN_LEAF down to 32 tris (Props.jsx) that is
+    // 2.8M, a 2.6x cut. The cost is a coarser dome: clumpR is now 1.27x its
+    // pre-thinning value, so if the crowns start reading as faceted boulders
+    // again this is the number that did it — take it back and pay in count.
+    clumpR: [0.186, 0.271],
     fill: [5, 8],
     core: 1.15, // see pushTree: the mass that closes the dome over the fork
     crownLift: 0.35, // masses ride this much above the branch tip
@@ -140,7 +152,7 @@ export const SPECIES = {
     // /1.45 with the x1.61 count above — a slight NET rise in absolute speckle
     // (+11%), because a 40% narrower leaf hides less of the head it sits on and
     // the reference's crown speckle is meant to be countable.
-    bloom: { tint: 'flowerPink', per: 0.0131 },
+    bloom: { tint: 'flowerPink', per: 0.0182 }, // /0.72 with the perf trim
   },
   // taller, narrower, fewer masses — breaks up a row of identical crowns
   slim: {
@@ -155,13 +167,13 @@ export const SPECIES = {
     // same rebalance as broadleaf: card x0.79, count x1.6, mass x0.92
     // ...then the CROWN_LEAF thinning: clumpR x1.08, massClumps x1.61
     mass: [0.61, 0.81],
-    massClumps: [93, 116],
-    clumpR: [0.136, 0.205],
+    massClumps: [67, 84],
+    clumpR: [0.160, 0.242],
     fill: [4, 6],
     core: 0.98,
     crownLift: 0.42,
     leaf: [C.leafDark, C.shrub, C.leafLight],
-    bloom: { tint: 'flowerPink', per: 0.0124 }, // /1.45, see broadleaf
+    bloom: { tint: 'flowerPink', per: 0.0172 }, // /1.45 then /0.72, see broadleaf
   },
   // low and wide with a warmer crown, for the plaza planters
   blossom: {
@@ -176,8 +188,8 @@ export const SPECIES = {
     // same rebalance as broadleaf: card x0.79, count x1.6, mass x0.92
     // ...then the CROWN_LEAF thinning: clumpR x1.08, massClumps x1.61
     mass: [0.68, 0.89],
-    massClumps: [108, 134],
-    clumpR: [0.153, 0.221],
+    massClumps: [78, 96],
+    clumpR: [0.181, 0.261],
     fill: [6, 9],
     // The biggest core of the three, and it is the planter tree's whole fix:
     // the last capture's bed tree was a loose CONE with the trunk visible
@@ -201,7 +213,7 @@ export const SPECIES = {
     // Both numbers up (was 0.035 / 0.05-0.08): the reference's crown speckle is
     // a flower you can count the petals on, and at 0.05-0.08 radius one of these
     // covered ~3px at chase distance and vanished into the leaf entirely.
-    bloom: { tint: 'flowerPink', per: 0.0234 }, // /1.45, see broadleaf
+    bloom: { tint: 'flowerPink', per: 0.0325 }, // /1.45 then /0.72, see broadleaf
   },
 }
 
@@ -235,7 +247,7 @@ export const BUSH = { rx: 0.62, ry: 0.34, y: 0.3, lobes: [3, 5] }
 // pass, which is 5 of the 7 points, and 0.10 -> 0.04 of lift is the other 2. The
 // floor is now leafDark(L20) lifted 4% toward L45, i.e. L21 before `deep` — a
 // real dark green, still nowhere near black.
-const SHADE_LIFT = 0.04
+// Live value: F.shadeLift (default 0.04) — the knob owns it now, see foliageKnobs.js.
 // ...and the BED's floor is now a SEPARATE number, because the two ends were
 // measured separately and disagreed. The crown's shaded end is on target (game
 // L34 median, dark tail matching the reference), but the bed's dark 10% sits at
@@ -246,13 +258,44 @@ const SHADE_LIFT = 0.04
 // bed reads as a spiky black-and-lime pattern at chase distance instead of as
 // plants with shadow between them. 0.24 lifts leafDark's L20 a quarter of the
 // way to shrub's L45, i.e. ~L26 before `deep` — +5, which is the measured gap.
-const BED_LIFT = 0.24
-const LEAF_MID = new THREE.Color(C.leaf)
-const LEAF_LOW = new THREE.Color(C.leafDark).lerp(LEAF_MID, SHADE_LIFT)
-export const LEAF_TOP = new THREE.Color(C.leafLight)
-export const SHRUB_TOP = new THREE.Color(C.shrub)
-export const SHRUB_LOW = new THREE.Color(C.leafDark).lerp(SHRUB_TOP, BED_LIFT)
+// Live value: F.bedLift (default 0.24) — the knob owns it now, see foliageKnobs.js.
+// Derived stops, recomputed from the live knobs by refreshStops() at the top of
+// every push* entry point rather than frozen at module load. A generation is
+// ~5 Color writes per plant against thousands of rows, and it is the only way a
+// leva colour can reach art that is baked once into an InstancedMesh.
+const LEAF_MID = new THREE.Color()
+const LEAF_LOW = new THREE.Color()
+export const LEAF_TOP = new THREE.Color()
+export const SHRUB_TOP = new THREE.Color()
+export const SHRUB_LOW = new THREE.Color()
 const BARK = new THREE.Color(C.trunk)
+
+// The authored triples, snapshotted before any knob can touch them. A species
+// stop that is NOT one of the four palette greens is deliberate (see `tall`'s
+// hot '#dee949' top) and must survive a colour knob; matching against this
+// snapshot is what tells the two cases apart without a second flag to keep in
+// sync.
+const SPECIES_LEAF0 = Object.fromEntries(SPECIES_KEYS.map((k) => [k, [...SPECIES[k].leaf]]))
+const PALETTE_KEY = { [C.leafDark]: 'leafDark', [C.leaf]: 'leaf', [C.leafLight]: 'leafLight', [C.shrub]: 'shrub' }
+
+/**
+ * Pull the leaf ramp out of the live knobs. SPECIES' own `leaf` triples are
+ * rewritten too, because pushTree reads them as strings per call.
+ */
+function refreshStops() {
+  LEAF_MID.set(F.leaf)
+  LEAF_LOW.set(F.leafDark).lerp(LEAF_MID, F.shadeLift)
+  LEAF_TOP.set(F.leafLight)
+  SHRUB_TOP.set(F.shrub)
+  SHRUB_LOW.set(F.leafDark).lerp(SHRUB_TOP, F.bedLift)
+  for (const k of SPECIES_KEYS) {
+    const orig = SPECIES_LEAF0[k]
+    for (let i = 0; i < 3; i++) {
+      const slot = PALETTE_KEY[orig[i]]
+      SPECIES[k].leaf[i] = slot ? F[slot] : orig[i]
+    }
+  }
+}
 const _leaf = new THREE.Color()
 
 const lerp = (a, b, t) => a + (b - a) * t
@@ -420,15 +463,28 @@ function leafMass(b, cx, cy, cz, rad, n, sp, rnd, low, mid, top) {
     const th = 0.96 + rnd() * 0.26 // 55-70 degrees off the surface normal
     const ct = Math.cos(th)
     const st = Math.sin(th)
+    // ...and the hang RAMPS WITH `edge`, which is the "make them look like
+    // leaves that hang down" pass. A flat 0.26 is ~15 degrees, and 15 degrees
+    // off tangential is a tuft: at chase distance the dome's rim read as a
+    // horizontal fringe with no drop, because the only blades whose tips clear
+    // the silhouette are the outer ones and those were the ones lying flattest.
+    // Interior blades keep the shallow hang (they are fill — droop them and
+    // they just point at the trunk), the rim gets 0.26 + 0.62 = 0.88 against a
+    // roughly unit horizontal, i.e. ~41 degrees of pendulous droop, which is
+    // what puts a visible leaf TIP under every crown edge.
+    const hang = 0.26 + edge * 0.62
     let ax = nx * ct + (ux * cp + vx * sp2) * st
-    let ay = ny * ct + (vy * sp2) * st - 0.26 // the 15-degree downward hang
+    let ay = ny * ct + (vy * sp2) * st - hang
     let az = nz * ct + (uz * cp + vz * sp2) * st
     // ...but a blade on the crown's UNDERSIDE hangs its tip a full length below
-    // the row foliage.check measures the crown floor from, and at the tree
-    // scales levelData emits that is the crown touching the ground. Ease the aim
-    // back toward level below -0.2 rather than clamping it flat, so the outer
-    // skirt still droops and the interior does not.
-    if (ay < -0.2) ay = -0.2 + (ay + 0.2) * 0.3
+    // the row foliage.check measures the crown floor from (that check reads the
+    // row's centre and radius — it cannot see an aim), and at the tree scales
+    // levelData emits that is the crown touching the ground. Ease the aim back
+    // toward level past the knee rather than clamping it flat, so the outer
+    // skirt still droops and the interior does not. The knee moved -0.2 -> -0.75
+    // with the ramp above: at -0.2 it caught nearly every rim blade and squashed
+    // the droop straight back out, which is the change undoing itself.
+    if (ay < -0.75) ay = -0.75 + (ay + 0.75) * 0.3
 
     clump(
       b,
@@ -443,7 +499,7 @@ function leafMass(b, cx, cy, cz, rad, n, sp, rnd, low, mid, top) {
       // median. A clamped population reads as bright blobs stamped on the dome —
       // the exact failure SUN_FACE's own comment warns about, arrived at from
       // the height term instead. 0.32 + 0.456 + 0.22 tops out at 0.996.
-      0.32 + oy / (rad * 1.8) + face * SUN_FACE,
+      0.32 + oy / (rad * 1.8) + face * F.sunFace,
       1 - edge,
       rnd,
       low, mid, top,
@@ -469,6 +525,7 @@ function leafMass(b, cx, cy, cz, rad, n, sp, rnd, low, mid, top) {
 
 /** `rnd` is the plant's own stream, so the table is a species, not a stamp. */
 export function pushTree(b, x, y, z, s, r, rnd, speciesName) {
+  refreshStops()
   const sp = SPECIES[speciesName] || SPECIES[SPECIES_KEYS[Math.floor(rnd() * SPECIES_KEYS.length)]]
   const low = new THREE.Color(sp.leaf[0])
   const mid = new THREE.Color(sp.leaf[1])
@@ -684,10 +741,14 @@ export function pushTree(b, x, y, z, s, r, rnd, speciesName) {
  * soil, not luck.
  */
 export function pushBed(b, x, y, z, w, d, rnd, s = 1, opt = {}) {
+  refreshStops()
   // `bodyF` is gone: the body is no longer a density, it is a GRID PITCH (below),
   // which is the whole point of the rosette rework — a count cannot express
   // "leave a gap between neighbours".
-  const { fill = 1, rise = 0.34, dome = 0.4, over = 0.16, hole = 0, fineF = 1.35, gap = 2.9 } = opt
+  const { fill: fill0 = 1, rise = 0.34, dome = 0.4, over = 0.16, hole = 0, fineF = 1.35, gap = 2.9 } = opt
+  // bare fraction goes as exp(-fill), so the knob is a multiplier on the
+  // authored per-bed value rather than a replacement for it
+  const fill = fill0 * F.bedFill
   const hw = w / 2 + over
   const hd = d / 2 + over
   const area = hw * hd * 4
@@ -898,6 +959,7 @@ export function pushBed(b, x, y, z, w, d, rnd, s = 1, opt = {}) {
  * a speckle of colour over the leaf, which means many and tiny.
  */
 export function pushBlooms(b, x, y, z, w, d, rnd, s = 1, opt = {}) {
+  refreshStops()
   // 2.6 -> 4.4 -> 9.2 -> 4.6, and the round trip is the useful record. Yellow
   // measured 1.07% of frame against the reference's 2.9-4.5%, so `per` doubled —
   // and the capture came back a CARPET: yellow was most of the bed's plan and the
@@ -1005,6 +1067,7 @@ export function pushBlooms(b, x, y, z, w, d, rnd, s = 1, opt = {}) {
 }
 
 export function pushBush(b, x, y, z, s, r, rnd) {
+  refreshStops()
   const lobes = picki(rnd, BUSH.lobes)
   for (let i = 0; i < lobes; i++) {
     const a = r + (i / lobes) * TAU + (rnd() - 0.5) * 0.8

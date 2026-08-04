@@ -118,6 +118,10 @@ export const P = {
   intro: 1,
   // the live run clock. useGame.timeLeft is a whole-second mirror of this.
   timeLeft: RUN_TIME,
+  // the challenge sheet is open. GameLoop skips the clock AND the sim, so it is
+  // a real pause; it lives on P (not the store) because the frame loop is the
+  // only reader and a store flag would re-render the HUD to say so.
+  paused: false,
   throttle: 0,
   steer: 0,
   braking: false,

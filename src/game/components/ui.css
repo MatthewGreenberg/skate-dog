@@ -45,10 +45,6 @@
   left: var(--edge);
   min-width: calc(var(--u) * 11.5);
 }
-.hud-bones {
-  top: var(--edge);
-  right: var(--edge);
-}
 .hud-pill.pop {
   animation: hudPop 0.34s cubic-bezier(0.34, 1.56, 0.5, 1);
 }
@@ -90,9 +86,6 @@
 
 /* ------------------------------------------------------------ goal card */
 .hud-goals {
-  position: absolute;
-  top: calc(var(--edge) + var(--u) * 4.6);
-  left: var(--edge);
   display: flex;
   flex-direction: column;
   gap: calc(var(--u) * 0.22);
@@ -140,11 +133,86 @@
   35% { transform: translateX(calc(var(--u) * 0.5)); }
   100% { transform: translateX(0); }
 }
-/* On a phone the card is a scoreboard, not a to-do list — you can't read ten
-   hints while steering, and they'd sit under your thumb. */
-@media (pointer: coarse) {
-  .hud-goal span { display: none; }
-  .hud-goal { font-size: calc(var(--u) * 0.78); }
+/* The hints survive on touch now: the list is only ever open while you're
+   reading it (start card or the ☰ sheet), never under your thumb mid-run. */
+
+/* ------------------------------------------------------------ challenge sheet */
+.hud-menu {
+  position: absolute;
+  top: var(--edge);
+  right: var(--edge);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.55);
+  height: calc(var(--u) * 3.5);
+  padding: 0 calc(var(--u) * 1.15);
+  border-radius: 999px;
+  border: var(--rim) solid rgba(255, 255, 255, 0.9);
+  background: linear-gradient(rgba(96, 54, 160, 0.66), rgba(58, 28, 106, 0.72));
+  color: #fff;
+  font: inherit;
+  font-size: calc(var(--u) * 1.35);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  pointer-events: auto;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.hud-menu.is-open { background: linear-gradient(#ffe14d, #f0b93a); color: #3a2358; }
+.hud-menu-bars {
+  width: calc(var(--u) * 1.35);
+  height: calc(var(--u) * 1.05);
+  border-top: var(--rim) solid currentColor;
+  border-bottom: var(--rim) solid currentColor;
+  position: relative;
+}
+.hud-menu-bars::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% - var(--rim) / 2);
+  border-top: var(--rim) solid currentColor;
+}
+.hud-sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(40, 17, 70, 0.42);
+  pointer-events: auto;
+  animation: hudFade 0.18s ease-out;
+}
+.hud-sheet-card {
+  padding: calc(var(--u) * 1.4) calc(var(--u) * 1.8);
+  border-radius: calc(var(--u) * 1.1);
+  border: var(--rim) solid rgba(255, 255, 255, 0.55);
+  background: linear-gradient(rgba(96, 54, 160, 0.82), rgba(58, 28, 106, 0.88));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+/* on the start card it's a briefing, not a modal — it sits in the column flow */
+.hud-sheet-card.is-brief {
+  background: rgba(64, 38, 110, 0.4);
+  text-align: left;
+}
+.hud-sheet-foot {
+  margin-top: calc(var(--u) * 0.9);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: calc(var(--u) * 0.74);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.hud-sheet-card.is-brief .hud-sheet-foot { display: none; }
+.hud-sheet-title {
+  margin-bottom: calc(var(--u) * 0.7);
+  color: #ffe14d;
+  font-size: calc(var(--u) * 0.92);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-shadow: 0 2px 4px var(--ink);
 }
 
 .hud-bone {

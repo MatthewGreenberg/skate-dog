@@ -17,13 +17,29 @@ let ctx = null, master = null, started = false, muted = false, grinding = false
 let whiteBuf = null, pinkBuf = null, loopEnd = 0
 let breezeLP = null, breezeGain = null, rollBP = null, rollGain = null
 let grindBP = null, grindLevel = null, grindGain = null
-let music = null, musicIdx = 0
+let music = null, musicIdx = 0, musicOrder = null
 const loops = [], unsubs = []
 let breezePhase = 0, birdTimer = 4, lastHalf = 0
 
+function shuffleMusic() {
+  // Random start, then the rest in authored order — one full pass with no
+  // repeats before wrapping. Reshuffling on wrap keeps the first song of the
+  // next pass from matching the last of the previous.
+  const n = MUSIC.length
+  const start = Math.floor(Math.random() * n)
+  const order = []
+  for (let i = 0; i < n; i++) order.push(MUSIC[(start + i) % n])
+  if (musicOrder && order[0] === musicOrder[musicOrder.length - 1] && n > 1) {
+    // rotate once more so the seam never double-plays the same track
+    order.push(order.shift())
+  }
+  musicOrder = order
+  musicIdx = 0
+}
+
 function playMusicTrack() {
-  if (!music) return
-  music.src = MUSIC[musicIdx]
+  if (!music || !musicOrder) return
+  music.src = musicOrder[musicIdx]
   music.volume = muted ? 0 : MUSIC_VOL
   music.play().catch(() => { /* gesture / autoplay policy */ })
 }
@@ -33,10 +49,11 @@ function startMusic() {
   music = new Audio()
   music.preload = 'auto'
   music.addEventListener('ended', () => {
-    musicIdx = (musicIdx + 1) % MUSIC.length
+    musicIdx++
+    if (musicIdx >= musicOrder.length) shuffleMusic()
     playMusicTrack()
   })
-  musicIdx = 0
+  shuffleMusic()
   playMusicTrack()
 }
 
@@ -442,6 +459,7 @@ export function disposeAudio() {
   loops.length = 0
   if (music) { music.pause(); music.src = ''; music = null }
   musicIdx = 0
+  musicOrder = null
   if (ctx) ctx.close().catch(() => { /* already closed */ })
   ctx = null
   master = breezeLP = breezeGain = rollBP = rollGain = grindBP = grindLevel = grindGain = null

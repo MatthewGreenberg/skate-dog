@@ -107,7 +107,24 @@ src/game/
                       is Tripo's arbitrary atlas; at FUR_TILE 7 the strands are
                       sub-millimetre and read as surface, not as a hairstyle,
                       and an island seam is a direction change, not a line.
-    foliage.js        plant generation, pure data -> instance rows. There are
+    foliage.js        plant generation, pure data -> instance rows. Trees,
+                      shrubs and planters are baked ONE InstancedMesh set PER
+                      24m CELL (Props.jsx `byCell`), not one for the park, and
+                      that is the entire frustum-culling story — there is no
+                      culling code. three culls an InstancedMesh by its own
+                      boundingSphere, computed off the instance matrices, so
+                      80 trees in one mesh had a sphere covering the whole park
+                      and every crown triangle was submitted every frame, main
+                      pass and shadow pass both. 80 trees -> 19 cells, 44
+                      shrubs -> 8, 12 planters -> 10; ~140 foliage draw calls if
+                      every cell were visible, and the chase lens is 20.5deg so
+                      typically 3-5 tree cells are. Draw calls were never the
+                      bottleneck; triangles were. `byCell` carries each item's
+                      ORIGINAL index because every seed here is `base + i*stride`
+                      — regrouping the list must not renumber it, or the whole
+                      park re-randomises. There is deliberately no LOD: with
+                      cells the visible crown load is ~0.7M tris and a second
+                      geometry tier would be speculative. There are
                       TWO leaf buckets and they are two GEOMETRIES on purpose:
                       `foliage` (beds + bushes, Props.jsx `LEAF`) and `crown`
                       (trees, `CROWN_LEAF`). They share the material, so it is
@@ -121,8 +138,16 @@ src/game/
                       max width at t=0.75 closing over the last QUARTER, a 20deg
                       half-angle, against the pad's 0.62 over 10% = 52deg, which
                       renders as a rounded cap). Mean aspect 6.0:1 against the
-                      pad's 3.2:1 (4.0:1 at the crest), 6 stations x the same
-                      6-ring = 60 tris against the pad's 72.
+                      pad's 3.2:1 (4.0:1 at the crest), 5 stations x a 4-ring =
+                      32 tris against the pad's 7 x 6 = 72. The crown's ring and
+                      station count are a PERF cut and the two arguments the pad
+                      makes against them are close-up arguments: the 6-gon
+                      section exists to kill a specular crease line, and the
+                      0.1/0.5 base station is a flare buried inside its own
+                      clump — at 0.32 wide seen from 15m+ a crown blade's tris
+                      are already sub-pixel and neither resolves. The shape
+                      stations (0.46 shoulder, 0.75 taper) are untouched,
+                      because the lanceolate point IS the read.
                       Do NOT unify the two blades — the direction asked for is
                       the opposite. Thin costs coverage: a blade's plan
                       footprint is (mean width x length x r^2) and bare fraction
@@ -131,9 +156,21 @@ src/game/
                       instance scale, not a triangle, and LONGER is not a
                       regression here: a long narrow blade is more leaf-like, a
                       wider one is the jellybean). Net n*w*l holds to within 1%
-                      per mass. 134k crown rows / 8.1M tris across the park's 80
-                      trees and 1 planter tree, +35% on the jellybean build, in
-                      the same two draw calls. leafMass's jitter cone also RAMPS
+                      per mass. Then a straight PERFORMANCE trim ran that same
+                      trade BACKWARDS across all three species — massClumps
+                      x0.72, clumpR x1.18 (n*r^2 = 1.002, coverage held, since
+                      the blade is a fixed shape scaled by r) — because 122k
+                      crown rows at 60 tris was 7.3M triangles, ~80% of all
+                      foliage in the park. With the 32-tri crown blade above:
+                      88k rows / 2.8M tris, and the park total 9.1M -> 4.6M in
+                      the same two draw calls. Every species' `bloom.per` is per
+                      LEAF ROW, so all three divide by 0.72 to hold the speckle.
+                      The cost is a coarser dome — clumpR is now 1.27x its
+                      pre-thinning value, so if the crowns read as faceted
+                      boulders again that is the number that did it; take it
+                      back and pay in count. `tools/` has no triangle census;
+                      the numbers here are newBuckets + pushTree/pushBush/
+                      pushBed over levelData, times tris-per-bucket-geometry. leafMass's jitter cone also RAMPS
                       DOWN at the rim (0.34 -> 0.24 at edge 1): the cone is the
                       only thing that can throw a blade past the crown envelope,
                       and a 40%-narrower stray reads as debris where a pad read
@@ -205,8 +242,23 @@ src/game/
                       crowns rendered as a ring of blunt bullet-ends pointing
                       radially out. leafMass builds a tangent frame on the radial
                       and swings the aim 55-70deg off the normal into it, with a
-                      15deg downward hang, so the dome edge is a scallop of
-                      overlapping leaf TIPS lying across the surface. Two
+                      downward hang, so the dome edge is a scallop of
+                      overlapping leaf TIPS lying across the surface. That hang
+                      RAMPS WITH `edge` (0.26 in the middle, 0.88 at the rim)
+                      rather than being flat: a flat 0.26 is ~15deg, and 15deg
+                      off tangential is a TUFT — the only blades whose tips
+                      clear the silhouette are the outer ones, and those were
+                      the ones lying flattest, so the dome rim read as a
+                      horizontal fringe with no drop. Measured after: tip pitch
+                      below horizontal p10 -6deg / median 39 / p90 59, and the
+                      lowest blade tip in the park sits 0.42 over its own soil.
+                      Interior blades keep the shallow hang deliberately —
+                      droop a fill blade and it just points at the trunk. The
+                      underside easing knee moved -0.2 -> -0.75 with it, or it
+                      caught nearly every rim blade and squashed the droop
+                      straight back out; foliage.check's crown floor reads a
+                      row's centre and radius and CANNOT see an aim, so that
+                      knee is the only thing keeping the skirt off the ground. Two
                       consequences, both paid for: an underside blade's aim is
                       eased back toward level below -0.2 or its tip hangs a full
                       length under the row the checks measure the crown floor
@@ -566,6 +618,38 @@ src/game/
                       wet plastic, not fur. Player.jsx owns the leva folder
                       ("Clear coat") because two useControls on the same path
                       is a duplicate-key clash
+                      FoliageControls.jsx = the "foliage" leva folder (blade
+                      dimensions for bed and crown, the four greens, the three
+                      flower colours, the ramp lifts, sun bearing, bed fill).
+                      Mounted from Game.jsx under ?debug, outside the Canvas —
+                      it renders nothing. The knobs live in src/game/
+                      foliageKnobs.js, its own module for the same reason
+                      dogFit.js is one: a component file may not export shared
+                      mutable state under react-refresh, and BOTH Props.jsx
+                      (geometry) and level/foliage.js (colour, ramp, fill) read
+                      them. A knob CANNOT be a uniform write — the park bakes
+                      its InstancedMeshes once and sets matrixWorldAutoUpdate
+                      false — so bumpFoliage() re-runs Trees/Shrubs/Planters'
+                      useMemo through a useSyncExternalStore version, which is
+                      the same "a remount IS the reset" trick the runId bump
+                      uses for Bones/Letters/Cans. Consequences worth knowing:
+                      the blade geometries are `let` and rebuildFoliageGeo()
+                      DISPOSES the old pair (a slider drag is a rebuild per
+                      tick, and leaking a BufferGeometry per tick is a GPU
+                      leak); every numeric knob carries a coarse step for the
+                      same reason. The green knobs deliberately do NOT tint
+                      MAT.foliage/MAT.crown — LEAF_MAT is white on purpose and
+                      bake() divides the material base out to recover
+                      instanceColor, so tinting it applies the ramp twice; the
+                      greens reach the screen through foliage.js's
+                      refreshStops() instead, which also rewrites SPECIES' leaf
+                      triples against a module-load SNAPSHOT so a species with
+                      an authored stop (`tall`'s hot '#dee949') keeps it.
+                      Defaults mirror the shipped art exactly — foliage.check.js
+                      reports byte-identical numbers with the panel untouched.
+                      The panel is a SEARCH TOOL: bake a winner back into
+                      palette.js/foliage.js/Props.jsx with the measurement that
+                      justified it.
                       ToonFX.jsx = leva-driven toon try-out passes (posterize,
                       depth outline, halftone, pixelate, tilt shift), all OFF by
                       default so the shoot harness and acceptance targets are
@@ -733,6 +817,23 @@ zero puts up a scorecard with PLAY AGAIN. `RUN_TIME`/`TIME_BONUS`/`TIME_BAIL`
 are the knobs, all in store.js. A short base clock is the point — at a flat 5:00
 the challenges carry no urgency and the timer is only pressure in the last
 thirty seconds.
+
+**The challenge list is not HUD furniture.** Eight to-do rows sat over the park
+for the whole session and nobody reads them while steering. They live in two
+places now, both the same `GoalList`: a briefing card on the start overlay
+(read them BEFORE the run) and a `☰ n/8` pill top-right that opens the list as
+a sheet mid-run, top-right. There is no bones pill any more — the count was one
+more permanent readout for something the bone pop, the chime and the scorecard
+already tell you. Esc TOGGLES the sheet (it is the only key that opens it, so
+that handler cannot be gated on `open`). Opening the sheet
+PAUSES: `P.paused` (not a store flag — the frame loop is its only reader) gates
+the whole `g.started` branch in GameLoop, so clock, goals and sim all stop. The
+`useEffect` that sets it must clear it on UNMOUNT as well as on close, or a run
+that ends with the sheet open freezes the next one.
+Completion still announces itself through the trick popup
+(`complete()` calls `showTrick`), which is why nothing is lost by hiding the
+list. The hints render on touch now too, since the list is only ever open while
+you're actually reading it.
 
 There is no `lives`. There used to be, and it did nothing: never displayed,
 and `bail()` reset it to 3 the instant it hit zero. Time is the one resource.

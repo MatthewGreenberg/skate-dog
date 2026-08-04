@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProgress } from '@react-three/drei'
-import { useGame } from '../store.js'
+import { useGame, P } from '../store.js'
 import { GOALS, resetGoals } from '../goals.js'
 import { BONES } from '../level/levelData.js'
 import { resetPlayer } from '../player/PlayerController.js'
@@ -64,24 +64,6 @@ function ScorePill() {
   )
 }
 
-function BonesPill() {
-  const bones = useGame((s) => s.bones)
-  const ref = useRef(null)
-  useEffect(() => {
-    if (!bones || !ref.current) return
-    const el = ref.current
-    el.classList.remove('pop')
-    void el.offsetWidth
-    el.classList.add('pop')
-  }, [bones])
-  return (
-    <div className="hud-pill hud-bones" ref={ref}>
-      <BoneIcon />
-      <span className="hud-score-value">{bones}/{BONES.length}</span>
-    </div>
-  )
-}
-
 const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
 // The run clock. The store only holds whole seconds (GameLoop mirrors P.timeLeft
@@ -107,9 +89,10 @@ function TimePill() {
   )
 }
 
-// The goal card. Ten rows is a lot of screen on a phone, so touch gets the
-// labels only once they're struck through — the list is a scoreboard there,
-// not a to-do list you can read while steering.
+// The challenge list. NOT permanent HUD furniture any more — you read it on the
+// start card before the run and behind the ☰ button during it. Eight rows of
+// to-do sat over the park the whole session and nobody reads them while
+// steering; the trick popup already announces each one as it lands.
 function GoalList() {
   const goalsDone = useGame((s) => s.goalsDone)
   return (
@@ -125,6 +108,49 @@ function GoalList() {
         )
       })}
     </div>
+  )
+}
+
+// The in-play menu: a pill that reads as progress until you tap it, then the
+// same list. Opening it PAUSES — P.paused stops the clock and the sim in
+// GameLoop. The unmount path has to clear it too, or ending the run with the
+// sheet open freezes the next one.
+function GoalMenu() {
+  const goalsDone = useGame((s) => s.goalsDone)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    P.paused = open
+    return () => {
+      P.paused = false
+    }
+  }, [open])
+  // Esc TOGGLES — it is the only key that opens the sheet, so it can't be
+  // gated on `open` the way a close-only handler would be.
+  useEffect(() => {
+    const key = (e) => e.key === 'Escape' && setOpen((v) => !v)
+    addEventListener('keydown', key)
+    return () => removeEventListener('keydown', key)
+  }, [])
+  return (
+    <>
+      <button
+        className={open ? 'hud-menu is-open' : 'hud-menu'}
+        aria-label="Challenges"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="hud-menu-bars" aria-hidden="true" />
+        {goalsDone.length}/{GOALS.length}
+      </button>
+      {open && (
+        <div className="hud-sheet" onClick={() => setOpen(false)}>
+          <div className="hud-sheet-card" onClick={(e) => e.stopPropagation()}>
+            <div className="hud-sheet-title">CHALLENGES</div>
+            <GoalList />
+            <div className="hud-sheet-foot">PAUSED — tap anywhere to resume</div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -335,6 +361,10 @@ function StartOverlay() {
   return (
     <div className={out ? 'hud-start is-out' : 'hud-start'}>
       {/* the SKATE DOG title is troika text in the scene — see Intro.jsx */}
+      <div className="hud-sheet-card is-brief">
+        <div className="hud-sheet-title">CHALLENGES</div>
+        <GoalList />
+      </div>
       <div className="hud-legend">
         {LEGEND.map(([key, what]) => (
           <div key={key}>
@@ -434,10 +464,9 @@ export default function GameUI() {
             for the HUD, but the reference captures are framed against the old
             widget row and must not grow one */}
         {!PHOTO && <TimePill />}
-        <BonesPill />
         {live && <MuteWave />}
+        {live && !PHOTO && !runOver && <GoalMenu />}
       </div>
-      {live && !PHOTO && <GoalList />}
       <TrickPopup />
       {live && TOUCH && !runOver && (
         <>

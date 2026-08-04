@@ -26,6 +26,7 @@ import PerformanceManager from './PerformanceManager.jsx'
 import GameUI from './GameUI.jsx'
 import Intro from './Intro.jsx'
 import useToonFX from './ToonFX.jsx'
+import FoliageControls from './FoliageControls.jsx'
 
 // One authoritative update order per frame: input -> movement/collision/surface
 // -> tricks/grinding -> animation channels -> audio. Views read P afterwards;
@@ -62,7 +63,7 @@ function GameLoop() {
     const dt = Math.min(delta, 0.1)
     sampleInput(dt)
     const g = useGame.getState()
-    if (g.started) {
+    if (g.started && !P.paused) {
       if (P.intro > 0) P.intro = Math.max(0, P.intro - dt / REVEAL)
       // The clock does not run during the reveal swoop — you can ride through
       // it, but you shouldn't be billed for the 1.5s the camera spends flying.
@@ -277,6 +278,9 @@ export default function Game() {
   return (
     <>
       <Leva hidden={!DEBUG} />
+      {/* leva-only, outside the Canvas: it writes module state and bumps a
+          version the foliage components subscribe to, and renders nothing. */}
+      {DEBUG && <FoliageControls />}
       <Canvas
         // PCF, not VSM. Variance shadows were costing us two separate blockers:
         // the moment blur rang across the bowl's curved transition as a fan of

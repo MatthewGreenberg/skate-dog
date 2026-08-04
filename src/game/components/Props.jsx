@@ -2,7 +2,7 @@
 // Everything static — foliage is baked into InstancedMeshes once and never
 // touched again; the hand-placed props share module-level geometry/materials.
 
-import { useMemo } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { RoundedBox } from '@react-three/drei'
@@ -11,6 +11,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { C, M } from '../palette.js'
 import { woodMap, woodNormal, woodRough } from '../level/textures.js'
 import { PHOTO, PHOTO_TIME } from '../photo.js'
+import { F, subscribeFoliage, foliageVersion } from '../foliageKnobs.js'
 import { TREES, SHRUBS, PLANTERS, BENCHES, LAMPS } from '../level/levelData.js'
 import { newBuckets, pushTree, pushBush, pushBed, pushBlooms } from '../level/foliage.js'
 
@@ -208,6 +209,12 @@ const PROFILE = [
 
 // A 6-point elliptical ring per station, semi-axes (W*p) across the face and
 // (T*p) through the thickness — see the crease argument in the doc comment.
+// ...for the BED pad, which is the one you stand next to. The tree crown takes
+// 4 (`ringOf` below): the rhombus-section crease argument is a close-up
+// argument, and a crown blade is 0.32 wide seen from 15m+ — at that size its
+// triangles are already sub-pixel and the specular line the 6-gon exists to
+// kill cannot resolve. It is 80% of the park's foliage triangles, so the two
+// vertices matter more than the crease does.
 const RING = 6
 // ...offset by half a step. At phase 0 two vertices land on the width axis and
 // NONE lands on the crest, so the top of the lens is a flat facet running the
@@ -218,15 +225,19 @@ const RING = 6
 // gives the leaf edge a fleshy roll rather than a knife. The cost is that the
 // face-on silhouette is now cos(30) = 0.866 of the ring's semi-axis, so W is
 // divided back out below — otherwise rotating the ring quietly narrows the blade.
-const RING_PHASE = Math.PI / RING
-const RING_K = 1 / Math.cos(RING_PHASE) // put the silhouette back where W says
-const RING_C = []
-const RING_S = []
-for (let i = 0; i < RING; i++) {
-  const a = RING_PHASE + (i / RING) * TAU
-  RING_C.push(Math.cos(a) * RING_K)
-  RING_S.push(Math.sin(a))
+function ringOf(n) {
+  const phase = Math.PI / n
+  const k = 1 / Math.cos(phase) // put the silhouette back where W says
+  const c = []
+  const s = []
+  for (let i = 0; i < n; i++) {
+    const a = phase + (i / n) * TAU
+    c.push(Math.cos(a) * k)
+    s.push(Math.sin(a))
+  }
+  return { c, s }
 }
+const RINGS = { 4: ringOf(4), 6: ringOf(6) }
 
 // Aspect is quoted at MAX width: 2.55 / (2*0.532) = 2.40:1 at the crest, which
 // with PROFILE's 0.752 area is 3.19:1 as a MEAN — the number the eye actually
@@ -251,7 +262,8 @@ for (let i = 0; i < RING; i++) {
 // the half of a rosette that faces the camera) and the edge-on aspect is 3.0:1.
 // `prof` defaults to the bed's pad. The tree crown passes CROWN_PROFILE — see
 // CROWN_LEAF below for why the two shapes are not allowed to converge.
-function leafBlade(W = 0.532, L = 2.55, T = 0.42, prof = PROFILE) {
+function leafBlade(W = 0.532, L = 2.55, T = 0.42, prof = PROFILE, ring = RING) {
+  const { c: RING_C, s: RING_S } = RINGS[ring]
   const pos = []
   const idx = []
   for (let i = 0; i < prof.length; i++) {
@@ -262,12 +274,12 @@ function leafBlade(W = 0.532, L = 2.55, T = 0.42, prof = PROFILE) {
     const th = T * p
     const y = (t - 0.42) * L // base sits behind the row point, tip reaches past it
     const bend = t * t * 0.22 // a slight curl, so it is a leaf and not a spike
-    for (let k = 0; k < RING; k++) pos.push(RING_C[k] * w, y, bend + RING_S[k] * th)
+    for (let k = 0; k < ring; k++) pos.push(RING_C[k] * w, y, bend + RING_S[k] * th)
     if (i) {
-      const a = (i - 1) * RING
-      const b = i * RING
-      for (let k = 0; k < RING; k++) {
-        const k2 = (k + 1) % RING
+      const a = (i - 1) * ring
+      const b = i * ring
+      for (let k = 0; k < ring; k++) {
+        const k2 = (k + 1) % ring
         idx.push(a + k, b + k, b + k2, a + k, b + k2, a + k2)
       }
     }
@@ -397,14 +409,36 @@ function budCluster() {
  * what pays for it: the park's crown rows go 75k -> ~121k for 5.4M -> 7.3M tris
  * in the same two draw calls.
  */
+//
+// 5 stations and a 4-ring, not 6 and 6: 32 tris a blade against the pad's 72.
+// The dropped station is the 0.1/0.5 base flare, which sits INSIDE the clump it
+// belongs to and never reaches a silhouette. Crown rows are ~80% of the park's
+// foliage triangles, so this is where the budget is — 7.3M -> 2.6M with the
+// count trim in foliage.js. Shape stations (the 0.46 shoulder, the 0.75 taper)
+// are untouched, because the lanceolate point IS the read.
 const CROWN_PROFILE = [
-  [0, 0], [0.1, 0.5], [0.28, 0.92], [0.46, 1], [0.75, 0.72], [1, 0],
+  [0, 0], [0.28, 0.92], [0.46, 1], [0.75, 0.72], [1, 0],
 ]
+const CROWN_RING = 4
 
-const LEAF = leafBlade()
-const CROWN_LEAF = leafBlade(0.32, 2.55, 0.26, CROWN_PROFILE)
+// `let`, not const, because the "Foliage" leva folder rebuilds them. A knob
+// cannot be a uniform write here: the park bakes its InstancedMeshes once and
+// sets matrixWorldAutoUpdate = false, so a blade dimension only reaches the
+// screen by regenerating the geometry AND re-baking every row that uses it.
+let LEAF = leafBlade(F.bladeW, F.bladeL, F.bladeT)
+let CROWN_LEAF = leafBlade(F.crownW, F.crownL, F.crownT, CROWN_PROFILE, CROWN_RING)
 const BLOOM = daisy()
 const BUDS = budCluster()
+
+/** Rebuild the two knob-driven blades. Disposes the old ones — a slider drag
+ *  is a rebuild per tick and leaking a BufferGeometry per tick is a GPU leak. */
+function rebuildFoliageGeo() {
+  LEAF.dispose()
+  CROWN_LEAF.dispose()
+  LEAF = leafBlade(F.bladeW, F.bladeL, F.bladeT)
+  CROWN_LEAF = leafBlade(F.crownW, F.crownL, F.crownT, CROWN_PROFILE, CROWN_RING)
+  BUCKET_GEO.crown = CROWN_LEAF
+}
 
 // Woody segments are UNIT cylinders anchored at their base, so a row's scale is
 // (radius, length, radius) and its two rotation terms aim it. Anchoring at the
@@ -551,6 +585,58 @@ function bakeShade(rows) {
   return mesh
 }
 
+/**
+ * Subscribes to the foliage knobs and returns a version that invalidates every
+ * foliage useMemo below. Geometry is rebuilt here rather than inside each memo
+ * so the three components share one rebuild per change, not three.
+ */
+function useFoliageBuild() {
+  const v = useSyncExternalStore(subscribeFoliage, foliageVersion, foliageVersion)
+  return useMemo(() => {
+    if (v > 0) {
+      rebuildFoliageGeo()
+      // NOT MAT.foliage/MAT.crown — LEAF_MAT is deliberately white and every
+      // clump carries its own linear colour, which bake() divides the base out
+      // of. Tinting it would apply the leaf ramp twice. The green knobs reach
+      // the screen through foliage.js's refreshStops() instead.
+      MAT.flowerWhite.color.set(F.flowerWhite)
+      MAT.flowerPink.color.set(F.flowerPink)
+      MAT.flowerYellow.color.set(F.flowerYellow)
+    }
+    return v
+  }, [v])
+}
+
+/**
+ * Split a plant list into spatial cells, ONE InstancedMesh set per cell.
+ *
+ * This is the whole frustum-culling fix and it needs no culling code. three
+ * culls an InstancedMesh by its own boundingSphere (computed lazily off the
+ * instance matrices), so the park's 80 trees baked into one mesh had a sphere
+ * covering the entire park — never outside the frustum, so every crown
+ * triangle was submitted every frame, main pass AND shadow pass. The chase
+ * lens is 20.5 degrees; it sees a small wedge of a ~90m park.
+ *
+ * The trade is draw calls: ~12 occupied cells x 3-4 buckets instead of 4. Draw
+ * calls are not the bottleneck here — 2.8M crown triangles are — and the cells
+ * outside the wedge cost nothing at all.
+ *
+ * The item's ORIGINAL index rides along, because every seed in this file is
+ * `base + i * stride` and regrouping the list must not renumber it. Byte
+ * identical rows, different meshes.
+ */
+const CELL = 24
+function byCell(items) {
+  const m = new Map()
+  items.forEach((it, i) => {
+    const k = `${Math.floor(it.x / CELL)},${Math.floor(it.z / CELL)}`
+    const g = m.get(k)
+    if (g) g.push([it, i])
+    else m.set(k, [[it, i]])
+  })
+  return [...m.values()]
+}
+
 function Clumps({ buckets, receive = false }) {
   const meshes = useMemo(
     () =>
@@ -563,34 +649,52 @@ function Clumps({ buckets, receive = false }) {
 }
 
 export function Trees() {
-  const { buckets, shade } = useMemo(() => {
-    const b = newBuckets()
-    TREES.forEach((t, i) => pushTree(b, t.x, t.base || 0, t.z, t.s, t.r, prng(9001 + i * 977)))
+  const v = useFoliageBuild()
+  const { cells, shade } = useMemo(() => {
+    const cells = byCell(TREES).map((group) => {
+      const b = newBuckets()
+      group.forEach(([t, i]) => pushTree(b, t.x, t.base || 0, t.z, t.s, t.r, prng(9001 + i * 977)))
+      return b
+    })
     return {
-      buckets: b,
+      cells,
       shade: bakeShade(TREES.map((t) => [t.x, t.base || 0, t.z, 1.7 * t.s])),
     }
-  }, [])
+    // v is the rebuild key from the foliage knobs — nothing inside the memo
+    // references it, so eslint cannot see that it is load-bearing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v])
   return (
     <>
-      <Clumps buckets={buckets} />
+      {cells.map((b, i) => (
+        <Clumps key={i} buckets={b} />
+      ))}
       <primitive object={shade} dispose={null} />
     </>
   )
 }
 
 export function Shrubs() {
-  const { buckets, shade } = useMemo(() => {
-    const b = newBuckets()
-    SHRUBS.forEach((s, i) => pushBush(b, s.x, s.base || 0, s.z, s.s, s.r, prng(4243 + i * 613)))
+  const v = useFoliageBuild()
+  const { cells, shade } = useMemo(() => {
+    const cells = byCell(SHRUBS).map((group) => {
+      const b = newBuckets()
+      group.forEach(([s, i]) => pushBush(b, s.x, s.base || 0, s.z, s.s, s.r, prng(4243 + i * 613)))
+      return b
+    })
     return {
-      buckets: b,
+      cells,
       shade: bakeShade(SHRUBS.map((s) => [s.x, s.base || 0, s.z, 0.85 * s.s])),
     }
-  }, [])
+    // v is the rebuild key from the foliage knobs — nothing inside the memo
+    // references it, so eslint cannot see that it is load-bearing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v])
   return (
     <>
-      <Clumps buckets={buckets} receive />
+      {cells.map((b, i) => (
+        <Clumps key={i} buckets={b} receive />
+      ))}
       <primitive object={shade} dispose={null} />
     </>
   )
@@ -611,9 +715,10 @@ const LIP = 0.26 // width of the stone rail that frames the top edge
 const LIP_H = 0.2
 
 export function Planters() {
-  const buckets = useMemo(() => {
+  const v = useFoliageBuild()
+  const cells = useMemo(() => byCell(PLANTERS).map((group) => {
     const b = newBuckets()
-    PLANTERS.forEach((p, i) => {
+    group.forEach(([p, i]) => {
       // TWO streams per planter, and the split is a bug fix, not tidying. There
       // used to be one `rnd` handed to pushTree FIRST and pushBed second, so the
       // bed's draw started at whatever offset the tree happened to leave the
@@ -663,7 +768,10 @@ export function Planters() {
       }
     })
     return b
-  }, [])
+    // v is the rebuild key from the foliage knobs — nothing inside the memo
+    // references it, so eslint cannot see that it is load-bearing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [v])
 
   return (
     <group>
@@ -713,7 +821,9 @@ export function Planters() {
           </group>
         )
       })}
-      <Clumps buckets={buckets} receive />
+      {cells.map((b, i) => (
+        <Clumps key={i} buckets={b} receive />
+      ))}
     </group>
   )
 }

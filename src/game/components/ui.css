@@ -8,7 +8,8 @@
   font-family: ui-rounded, 'SF Pro Rounded', 'Nunito', system-ui, -apple-system, sans-serif;
   /* Every HUD size is a multiple of this one unit, so the whole overlay scales
      with the viewport. 11px @ 700w -> 16.5px @ 1440w -> 22.7px @ 2560w. */
-  --u: clamp(11px, 0.55vw + 8.6px, 26px);
+  --u0: clamp(11px, 0.55vw + 8.6px, 26px);
+  --u: var(--u0);
   --edge: calc(var(--u) * 1.45);
   /* hairline, not a sticker outline: at u/8 the white rim was the loudest edge
      in the frame and read as a mobile-game chrome kit stuck over the park */
@@ -28,6 +29,15 @@
 }
 .hud-widgets.is-idle {
   opacity: 0;
+}
+/* ponytail: on a phone the three top widgets are one row across ~390px and the
+   score's 11.5u pill ran into the centred clock. Only the row shrinks — --edge
+   still comes off the full unit, so nothing moves, it just fits. */
+@media (pointer: coarse) {
+  .hud-pill,
+  .hud-menu {
+    --u: calc(var(--u0) * 0.74);
+  }
 }
 
 /* ------------------------------------------------------------ pills */
@@ -277,6 +287,24 @@
   color: #3a2358;
   transform: translateY(calc(var(--u) * -0.12));
   outline: none;
+}
+/* the mute wave is corner-anchored by default; in the sheet it is a row item */
+.hud-sheet-audio {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 0.8);
+  margin-top: calc(var(--u) * 1.1);
+  padding-top: calc(var(--u) * 0.9);
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: calc(var(--u) * 0.82);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+.hud-sheet-audio .hud-mute {
+  position: static;
+  flex: none;
 }
 .hud-sheet-foot {
   margin-top: calc(var(--u) * 0.9);
@@ -799,12 +827,6 @@
   cursor: pointer;
   opacity: 0.85;
   transition: opacity 0.15s ease;
-}
-@media (pointer: coarse) {
-  .hud-mute {
-    /* sit above the jump button */
-    bottom: calc(var(--edge) + env(safe-area-inset-bottom, 0px) + var(--u) * 8.5);
-  }
 }
 .hud-mute:hover { opacity: 1; }
 .hud-mute:focus,

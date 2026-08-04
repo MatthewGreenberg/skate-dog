@@ -223,6 +223,14 @@ function GoalMenu() {
             </div>
             <div className="hud-sheet-title">CHALLENGES</div>
             <GoalList />
+            {/* the wave has no room next to a thumb-sized jump button, so on
+                touch it lives here instead of the bottom-right corner */}
+            {TOUCH && (
+              <div className="hud-sheet-audio">
+                <span>SOUND</span>
+                <MuteWave />
+              </div>
+            )}
             <div className="hud-sheet-foot">PAUSED — tap anywhere to resume</div>
           </div>
         </div>
@@ -622,7 +630,7 @@ export default function GameUI() {
             for the HUD, but the reference captures are framed against the old
             widget row and must not grow one */}
         {!PHOTO && <TimePill />}
-        {live && <MuteWave />}
+        {live && !TOUCH && <MuteWave />}
         {live && !PHOTO && !runOver && <GoalMenu />}
       </div>
       <TrickPopup />

@@ -1046,7 +1046,12 @@ that ends with the sheet open freezes the next one.
 Completion still announces itself through the trick popup
 (`complete()` calls `showTrick`), which is why nothing is lost by hiding the
 list. The hints render on touch now too, since the list is only ever open while
-you're actually reading it.
+you're actually reading it. The MUTE WAVE also lives in the sheet on touch (a
+`SOUND` row) rather than in the bottom-right corner, where it had a thumb and a
+JUMP button for company. On a phone the three top widgets are one row across
+~390px and the score pill ran into the centred clock, so `.hud-pill`/`.hud-menu`
+redefine `--u` at 0.74 of the root `--u0` under `(pointer: coarse)` — the row
+shrinks, but `--edge` still comes off the full unit so nothing moves.
 
 There is no `lives`. There used to be, and it did nothing: never displayed,
 and `bail()` reset it to 3 the instant it hit zero. Time is the one resource.

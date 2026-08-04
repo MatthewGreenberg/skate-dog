@@ -91,10 +91,94 @@ src/game/
                       a cap 0.95 overhead from grabbing you as you roll past.
                       Planter rims are four separate runs, not a loop: a loop
                       snaps the heading 90 degrees at each corner.
+    decals.js         floor detail — a skating-dog mascot, candy-colour paw
+                      trails, rainbow skids, landing bursts, drains, flower
+                      weeds, confetti, party chalk and sticker bombs in clusters
+                      over the open plaza. They are NOT baked into plazaMap and
+                      that is the whole reason this file exists: the plaza map
+                      tiles every 8m over a ~70m park, so a drain painted into
+                      it is ~120 drains on a perfect grid. These are scattered
+                      in WORLD space as quads reading cells out of textures.js's
+                      `decalAtlas` (4x4, transparent GUTTER because mipping
+                      averages across cell borders and bleeds a neighbour's
+                      paint into every edge). One MERGED BufferGeometry, one draw
+                      call, ~350 tris — deliberately not an InstancedMesh, since
+                      instancing an atlas needs a per-instance uv-offset
+                      attribute and an onBeforeCompile to consume it, which at
+                      this triangle count buys nothing. Per-decal fade rides on
+                      vertex ALPHA (the colour attribute is itemSize 4, so three
+                      reads vColor as a vec4): scaling RGB instead would render a
+                      faint chalk mark as a DARK chalk mark. Character cells use
+                      confident pastel inks and high per-instance fade; drains,
+                      weeds and grit stay subdued. Transparent breathing room,
+                      chalk wobble and worn cutouts keep the brighter marks from
+                      reading as square sprites pasted over the render.
+                      The marks are drawn CUTE and deliberately so: paw pads are
+                      HEARTS, weeds carry tiny daisies (the flower bed's own
+                      language for "this is alive" — a bare green spike is
+                      neglect), the chalk is a dachshund face and a wobbling
+                      party dog, rainbow, wheel badge and wobbling hopscotch;
+                      sticker bombs mix a BONE, STAR, HEART and lightning bolt.
+                      `heartPath`/`starPath`/`bonePath`/
+                      `chalkLine` are the shape kit; chalkLine walks a polyline
+                      TWICE with a wobble, because chalk never closes a
+                      rectangle and a crisp stroked rect reads as a UI element
+                      lying on the floor. Intricacy is second-order detail that
+                      survives the fade: tread ribs cut ACROSS the rainbow skid,
+                      claw ticks pass each toe, a leaf catches on the drain, and
+                      grit has contact shadows and lit tops so it sits ON the
+                      slab. Character cells are weighted and scaled UP in
+                      decals.js KINDS, while utilitarian marks are punctuation.
+                      Placement is `groundHeightAt` and nothing else: every
+                      sample must land within 0.02 of y=0, so the existing
+                      collider tree is the single source of what a decal may sit
+                      on and there is no second footprint table to drift. Two
+                      things that shipped broken and are asserted now: the
+                      footprint is sampled as a GRID at 0.35m, not at four
+                      corners (a 0.95m planter fits neatly between two corner
+                      samples of a 2m quad, putting a chalk drawing up its side),
+                      and the perimeter test adds the quad's HALF-DIAGONAL to the
+                      margin (the test is on the centre, but the quad is what has
+                      to stay in bounds — a 3.4m dirt patch hung over the kerb).
+                      Cluster CENTRES reroll until they land on open floor, or
+                      the clusters that open on a deck lose every member and the
+                      park quietly ends up with a third of its decals.
+                      Skatepark's `Decals` sits the mesh 6mm up, transparent with
+                      depthWrite off — not alphaTest, which stencils a hard edge
+                      onto every soft chalk line, and depthWrite off is also what
+                      lets quads inside a cluster blend instead of z-fighting on
+                      a shared plane. polygonOffset alone still fights at the
+                      grazing angle this floor is seen at for the whole run.
     colliders.js      simplified collision built from levelData
     parkGeometry.js   plaza / grass / ramp meshes
     bowlGeometry.js   analytic bowl — the drawn surface IS the ridden surface
     textures.js       every procedural map: albedo, normal, roughness, baked AO.
+                      The PLAZA is the one surface drawn at double everyone
+                      else's resolution (albedo 2048, normal/rough 1024 = 256
+                      px/m over PLAZA_TILE 8): it is the only thing the camera
+                      sees at a grazing angle for the entire run. Resolution is
+                      not a free knob here — every PIXEL-unit constant moves
+                      with it. grain() counts go with AREA (x4), canvas
+                      `blur(Npx)` doubles, lineWidths double (or a 1cm crack
+                      becomes 2cm). normalFrom's sobel is a FIXED 3px kernel, so
+                      at 2x res it reads a half-width slope — but do NOT raise
+                      the strength to compensate. That was tried (0.55 -> 1.1)
+                      and the paver pad is a roundRect with a soft shoulder, so
+                      it turned that shoulder into a bright BEVEL RING inset
+                      from every paver edge: a white outline drawn inside all
+                      121 tiles of the floor. The shallower normal is the
+                      correct read — the joints are meant to be hard to find.
+                      crack()'s wander is `steps x len`: doubling
+                      STEPS at the same len is the HD move (same world length,
+                      finer segments); doubling LEN just makes a longer crack.
+                      Scuff (skid smears — wide, soft, neutral-dark, drawn OVER
+                      the grain) and MOSS live in plazaMap only. Moss is seeded
+                      ON a joint — one axis snapped to the paver grid, elongated
+                      along it, blurred — because moss creeps out of a joint and
+                      a hard-edged green blob in the middle of a slab reads as
+                      paint. Neither is in plazaRough yet; moss is matte and a
+                      skid is polished, so that is the next thing to add if the
+                      floor reads uniformly specular in a capture.
                       dogNormal/dogRough are the dog's coat — one fibre height
                       field (short strokes curled by a low-frequency noise
                       field, so the coat gets partings instead of a combed grid
@@ -364,18 +448,68 @@ src/game/
                       thirds of the park's crowns had no speckle at all.
   goals.js            the run's challenge table (see "The run" below)
   components/         Game (canvas + post), Lighting, Skatepark, Props, Player, Effects, UI
+                      ui.css had an upper-frame atmospheric haze on
+                      `.hud::before` (a screen-space FOG_COLOR gradient); it was
+                      REMOVED by request and the sky reads clean. Do not bring
+                      it back via three's Fog — that is keyed on DEPTH and the
+                      top of a chase frame is sky and far park at every depth,
+                      so hazing the sky veils the hero too.
                       Intro.jsx = the SKATE DOG title as troika text (drei
                       <Text>) floating in the park, billboarded to the camera.
                       Its font is served from public/fonts — troika's default
                       fontURL is a gstatic CDN and nothing here fetches over the
                       network. One reveal clock drives everything: P.intro goes
                       1 -> 0 over 1.5s from GameLoop on start, CameraController
-                      smoothsteps between the title orbit (radius 18, height
-                      +5.2, aim +2.3 — solved so the 2.1m title AND the dog fit
-                      the 20.5deg lens, which sees only 3.3m of half-frame
-                      there) and the chase rig, and the title scales to zero as
-                      it climbs out. The sim runs THROUGH the swoop, so you are
-                      already riding when the camera lands. PHOTO mode pins
+                      smoothsteps between the title orbit (radius 13, height
+                      +8.6 — ~27deg down, part way to the chase rig's 40 rather
+                      than the near-eye-level 10 it started at, so the reveal is
+                      a drop and a pull-back instead of only a pull-back) and the
+                      chase rig, while the title gives a small press-response
+                      pop and dissipates diagonally into one instanced field of
+                      cream, gold, and purple flecks. The solid SDF text fades
+                      and contracts under that field; the flecks scale to zero
+                      individually, so the dissolve adds only one draw call and
+                      needs no per-particle opacity materials.
+                      The START FRAME is composed as three claims on the frame,
+                      and nothing in it is placed in metres-above-the-dog any
+                      more: the TITLE takes the centre, the challenges card the
+                      upper right (DOM), and the DOG is pushed middle-left out of
+                      both. Each is anchored independently, which is the point —
+                      the title used to hang off P.pos, so the aim offset that
+                      slid the dog out from under the PLAY button dragged the
+                      title off the frame with it.
+                        - Title (Intro.jsx): anchored at the frame's CENTRE at
+                          the dog's depth (walk out along the camera's own
+                          forward), then offset by UP 0.06 of frame height —
+                          optical, since PLAY and the key legend weight the
+                          bottom. It scales to MAX_W 0.42 of frame width via
+                          viewport.getCurrentViewport, which replaces an old
+                          min(1, aspect) fudge: it measures the frame in METRES,
+                          so a portrait phone scales the title by what actually
+                          fits. The title and its breakup flecks render in a
+                          foreground order with depth testing off; they are
+                          graphic UI staged in 3D, and plaza decals must never
+                          punch through them during the camera move.
+                        - Dog: INTRO_AIM dropped 1.9 -> 0.9 and INTRO_SIDE slides
+                          the aim along the camera's own right. Shifting the AIM
+                          and not the EYE is deliberate — he moves in frame at an
+                          unchanged distance, so neither his size nor the title's
+                          scale follows. INTRO_SIDE is metres AT ASPECT 1 and is
+                          multiplied by the live aspect, because half-width is
+                          half-height x aspect: a fixed metre offset is a third
+                          of the way out on a monitor and off the edge on a
+                          phone. 1.64 against the 2.64m half-height is 0.62 of
+                          half-width, which is what clears the centred title's
+                          +-0.42 instead of parking the dog behind the letters.
+                      The sim runs THROUGH the swoop, so you are
+                      already riding when the camera lands. Player.jsx slerps
+                      the WHOLE rig (dog + rider, one group) onto a
+                      camera-facing yaw by that same smoothstep while P.intro is
+                      up: the intro camera ORBITS, and a parked dog holding its
+                      spawn heading shows the lens its back half the way round.
+                      Because the sim is live underneath, that blend has to hand
+                      the real heading back as intro decays rather than release
+                      it on a flag. PHOTO mode pins
                       P.intro to 0 and Intro renders nothing, so captures are
                       untouched. GameUI shows a loading screen until drei's
                       useProgress hits 100 (bone-chase bar + quips), latched so
@@ -417,6 +551,34 @@ src/game/
                       fire) — rainbow star halo + a streaming rainbow trail
                       until landing here, shimmer in AudioManager, and a
                       hang-time-scaled Big Air bonus through scoreAir.
+                      AMBIENT AIR (220 dust motes; drifting leaves lived here
+                      too and were cut by request) is the
+                      one thing here with NO pool: position is analytic in
+                      (index, time) and the field WRAPS around the camera, so
+                      nothing is allocated, expired or respawned and the park
+                      is never empty of air wherever you ride. The field is
+                      CARRIED by a DAMPED copy of the camera position (1.1/s),
+                      not anchored in the world: world-anchored, every particle
+                      is a fixed lattice point the 13 m/s chase camera flies
+                      through, so the motes streamed past sideways and crossed
+                      the whole 26m box in 2s — debris in a gale, not drift.
+                      Following the camera exactly is the other failure (motes
+                      pinned to your speed, zero parallax); the damped centre
+                      settles to the camera's velocity on a straight line and
+                      falls behind on turns, pops and stops, which is where the
+                      parallax comes from. wrapTo therefore wraps the OFFSET
+                      about 0, and the anchor is snapped hard to the camera
+                      under PHOTO. Seeds are
+                      golden-ratio sequences, not Math.random, and the clock is
+                      PHOTO_TIME under ?shot= — same pinning the wind and the
+                      bones use, so captures stay comparable run to run.
+                      Motes rise (sunlit dust), leaves fall and tumble. Both
+                      scale to zero at the wrap-box faces and at y=0.7, which
+                      is what stops a pop at the seam and clipping through the
+                      paving; the leaves are LIT (they are park matter, like
+                      the litter scraps) and the motes are toneMapped:false but
+                      deliberately UNDER the bloom threshold — a mote glints,
+                      it does not glow.
                       Bones.jsx = 5 floating collectible bones (positions in
                       levelData BONES, solved against the measured launch
                       heights so each wants a specific line: qp1 coping ollie,
@@ -440,6 +602,13 @@ src/game/
                       single-sided quad, so a world-Y spin shows you the letter
                       backwards half the time, and reading which one you still
                       need from across the park is the whole objective. Parked
+                      Hidden until `started` — the start frame is a composed shot
+                      (title centred, dog middle-left, briefing card top-right)
+                      and eight glyphs over the park is clutter in it. It is a
+                      `visible` toggle, NOT an unmount: troika builds its SDF
+                      geometry asynchronously, and deferring eight of those to
+                      the PLAY click buys a hitch on the run's first frame.
+                      Parked
                       on the three transitions the bones DON'T use (bank4 onto
                       pad2, the ledge1 grind, bank2 onto deckB) so spelling the
                       word walks you round the park.
@@ -801,8 +970,22 @@ src/game/
     boneRig.js        drives boy.glb's skeleton from angles authored for a
                       procedural rig — read it before touching any pose number
 tools/                capture harness (see below)
-public/boy.glb        the rider. 4.1MB draco (was 34MB), 490k verts, 41 joints, no clips
-public/dog_compressed.glb  the dog. 4.6MB draco+ktx2, 534k verts, 31 joints, no clips
+public/boy.glb        the rider. 1.7MB draco, 112k verts, 41 joints, no clips
+public/dog_compressed.glb  the dog. 1.4MB draco+ktx2, 144k verts, 31 joints, no clips
+                      Both were DECIMATED (meshopt, ~0.2 ratio) from Tripo's
+                      490k/534k. That 1.02M verts was 42% of every frame's
+                      triangles — skinned twice, main pass and shadow pass —
+                      for two characters a few hundred pixels tall. Measured
+                      via renderer.info: hero 5.27M -> 2.23M tris/frame, plaza
+                      9.05M -> 6.01M. The hero capture (the closest framing
+                      there is) is indistinguishable from the original.
+                      Redo after any asset change:
+                        gltf-transform simplify in.glb tmp.glb --ratio 0.2 --error 0.002
+                        gltf-transform draco tmp.glb out.glb
+                      (simplify decodes draco, so it must be re-encoded after,
+                      or the file comes out BIGGER than the source. KTX2
+                      survives both passes.) boneRig.check.js still passes —
+                      meshopt leaves the node/skin tree alone.
 public/{draco,basis}/ decoders for the above, served locally on purpose
 public/fonts/         Luckiest Guy (OFL), the intro title face — local for the
                       same reason as the decoders
@@ -822,9 +1005,38 @@ thirty seconds.
 for the whole session and nobody reads them while steering. They live in two
 places now, both the same `GoalList`: a briefing card on the start overlay
 (read them BEFORE the run) and a `☰ n/8` pill top-right that opens the list as
-a sheet mid-run, top-right. There is no bones pill any more — the count was one
+a sheet mid-run, top-right. On the start card the eight rows are COLLAPSED
+behind a "View challenges" button — that panel shares the frame with the troika
+title, and the `n / 8 completed` count is the only part of it that means
+anything before your first run. The start card's panel and key legend are CREAM
+on the park, not the HUD's translucent purple: the start frame is a pastel
+sunset and a purple scrim over it reads as a dimmed screenshot. The legend is
+ONE bar with hairline dividers rather than five floating pills, for the same
+reason — five pills over a busy park is five silhouettes to parse.
+There is no bones pill any more — the count was one
 more permanent readout for something the bone pop, the chime and the scorecard
-already tell you. Esc TOGGLES the sheet (it is the only key that opens it, so
+already tell you.
+
+**The in-play HUD is deliberately quiet, and it is a ranked set, not three equal
+widgets.** It read as a generic mobile-game chrome kit stuck over the park,
+which is a contrast problem, not a layout one: `--rim` is a HAIRLINE
+(u/14, was u/8 — the white outline was the loudest edge in the frame) and pill
+shadows are CONTACT shadows (0.18u/0.45u at 0.26, was 0.5u/1.15u at 0.42, which
+detached the pill and smeared a dark halo over the pastel sky). The rank is
+SCORE > clock > menu: the score keeps the filled pill and grew to 2.1u/900, the
+clock is a ROSE sticker with a stopwatch icon — hierarchy carried by COLOUR
+against the score's purple, so two filled pills never read as one widget row.
+Its rim is the one deliberate exception to the hairline (`--rim` x1.6 at 0.94):
+it is a sticker on purpose. `is-urgent` is therefore a DEEPER rose plus the
+pulse, not a hue change — the pill is already red, and switching hue there reads
+as a different widget appearing. (A chrome-free clock with a wavy-underline
+squiggle was tried and rejected: it had no anchor at all against the sky.)
+The `☰ n/8` menu is NOT faded when idle — a dimmed interactive control
+reads as DISABLED rather than quiet, and it is the only door into the challenge
+list mid-run. The score's icon is a PAW, not a bone: the score is not a
+bone count — bones are their own collectible with their own pop and chime — and
+a bone there claimed otherwise. `BoneIcon` still runs the loading bar's chase
+marker, which is what it was for. Esc TOGGLES the sheet (it is the only key that opens it, so
 that handler cannot be gated on `open`). Opening the sheet
 PAUSES: `P.paused` (not a store flag — the frame loop is its only reader) gates
 the whole `g.started` branch in GameLoop, so clock, goals and sim all stop. The
@@ -940,7 +1152,9 @@ Plain `node`, no framework. Run them after touching what they cover.
 node src/game/level/foliage.check.js       # crowns, branch coverage, colour space
 node src/game/level/benches.check.js       # bench facing + footing vs walls/planters/decks
 node src/game/level/rails.check.js         # rail/post clearance vs walls, props, solids, other rails; lip-edge grinds
+                                           # samples the DRAWN catmull-rom curve, not the authored polyline
 node src/game/level/bones.check.js         # bone + D-O-G float band/spacing, can clearance
+node src/game/level/decals.check.js        # floor decals: on flat plaza only, in bounds, low contrast, inside the atlas gutter
 node src/game/goals.check.js               # each challenge pays once for +15s; predicates discriminate
 node src/game/level/ramps.check.js         # every ramp + stair enterable, climbable, qp1 pops vert, early pop transfers to deck
 node src/game/level/collision.check.js     # ~40s: broad-phase coverage, wall penetration, ramp seams, drops, dt consistency, perimeter
@@ -1129,7 +1343,12 @@ bed that rasterises solid is a bed you cannot count a plant in.
   `C.benchWood`: it multiplies a map that already carries a mid-tan. It was
   SOLVED against a capture rather than derived — map average, grain passes and
   the tone curve all move it — and lands a sunlit seat at (191,153,116) against
-  benchWood's (184,146,110). Re-measure it if the light rig moves. `woodRough` is
+  benchWood's (184,146,110). Re-measure it if the light rig moves. It has since
+  been warmed a notch off that solve (#9f9aa3 -> #a89a90, same luma, hue to tan)
+  and the material is MeshPhysicalMaterial for `sheen` — a varnished slat wants a
+  soft grazing bloom, and clearcoat (rider-only, see clearCoat.js) reads as wet
+  plastic on wood. Bench-only material, so the halfpipe ply captures are
+  untouched. `woodRough` is
   a remap of the SAME height field `woodNormal` is sobelled from (`plyHeight`,
   now cached separately) — a ridge the normal bumps up is a ridge the varnish
   makes glossier, and a seam, black in the height, clamps back to the authored
@@ -1141,8 +1360,15 @@ bed that rasterises solid is a bed you cannot count a plant in.
   front-edge divider, and stairC's two "side walls" hug its cheeks exactly, so
   three of the five handrails ran their tube AND their ground posts through a
   wall. Nothing looks wrong from a distance: the tube is 5.5cm and the wall is
-  opaque. Those three take an explicit inset `off` and run over the treads.
-  `rails.check.js` walks every rail at 10cm and measures it.
+  opaque. Those three took an explicit inset `off`. Then the remaining two —
+  stairA's, on a staircase with no walls near it at all — turned out to be
+  buried in the STAIRCASE ITSELF: `Stairs` draws a masonry stringer down each
+  cheek spanning `|lx| = w/2 .. w/2 + 0.5`, so `w/2 + 0.5` is that wall's outer
+  FACE and half the tube lived inside it for the whole run. The stringer is
+  drawn geometry, not a `WALLS` row, so the check had nothing to test against.
+  The default is `w/2 - 0.7` now — every handrail in the park runs inside the
+  treads, there is no outside — and `rails.check.js` carries the stringer's box
+  and walks the DRAWN catmull-rom curve at 10cm.
 - **TiltShiftEffect carries two masks that disagree.** The blur material ramps
   its strength with a smoothstep across `[focusArea - feather, focusArea]`, but
   the composite that picks blurred-vs-sharp is `step(offset-b) - step(offset+b)`

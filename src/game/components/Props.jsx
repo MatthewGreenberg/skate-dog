@@ -129,12 +129,19 @@ const MAT = {
   // capture, not derived — the map average, the grain passes and the tone curve
   // all move it — and a sunlit seat now measures (191,153,116) against
   // benchWood's (184,146,110). Re-measure it if the light rig moves.
-  wood: new THREE.MeshStandardMaterial({
-    color: '#9f9aa3',
+  // ponytail: warmed a notch off the solved grey (same luma, hue pulled to tan)
+  // and given sheen — physical, not clearcoat: a varnished slat should get a
+  // soft grazing-angle bloom, not the wet-plastic highlight clearcoat gives.
+  // Bench-only material, so the halfpipe ply captures are untouched.
+  wood: new THREE.MeshPhysicalMaterial({
+    color: '#a89a90',
     map: woodMap(),
     normalMap: woodNormal(),
     normalScale: new THREE.Vector2(0.6, 0.6),
     roughnessMap: woodRough(),
+    sheen: 0.35,
+    sheenRoughness: 0.55,
+    sheenColor: new THREE.Color('#e0c49c'),
     ...M.wood,
   }),
   iron: new THREE.MeshStandardMaterial({ color: C.benchIron, ...M.paintedMetal }),

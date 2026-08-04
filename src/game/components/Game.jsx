@@ -61,8 +61,8 @@ function GameLoop() {
       return
     }
     const dt = Math.min(delta, 0.1)
-    sampleInput(dt)
     const g = useGame.getState()
+    sampleInput(dt, g.runOver)
     if (g.started && !P.paused) {
       if (P.intro > 0) P.intro = Math.max(0, P.intro - dt / REVEAL)
       // The clock does not run during the reveal swoop — you can ride through

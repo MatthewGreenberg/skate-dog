@@ -32,6 +32,13 @@ export default function Letters() {
       const s = st.current[i]
       const b = LETTERS[i]
       if (!s.got) {
+        // Hidden until the run starts: the start frame is a composed shot (title
+        // centred, dog middle-left, briefing card top-right) and eight glyphs
+        // floating over the park is clutter in it. Toggled rather than
+        // unmounted — troika builds its SDF geometry asynchronously on mount,
+        // and deferring eight of those to the PLAY click buys a hitch on the
+        // first frame of the run for nothing.
+        g.visible = started
         g.position.y = b.y + Math.sin(time * 1.5 + i * 2.3) * 0.13
         // Billboarded, not spun. A troika glyph is a flat single-sided quad, so
         // a bone's world-Y spin would show you the letter backwards half the

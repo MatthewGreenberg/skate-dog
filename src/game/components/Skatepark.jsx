@@ -7,6 +7,7 @@ import { SOLIDS, WALLS, RAILS, PERIMETER, GRASS_Y, BOWL } from '../level/levelDa
 import { groundHeightAt, AO_FOOTPRINTS } from '../level/colliders.js'
 import { buildBowlGeometry, buildCopingGeometry } from '../level/bowlGeometry.js'
 import { buildPlazaGeometry, buildGrassGeometry, buildRampGeometry } from '../level/parkGeometry.js'
+import { buildDecalGeometry } from '../level/decals.js'
 import {
   plazaMap,
   plazaNormal,
@@ -24,6 +25,7 @@ import {
   bowlRough,
   grassMap,
   grassNormal,
+  decalAtlas,
   parkAOMap,
   PLAZA_TILE,
   MASONRY_TILE_X,
@@ -69,6 +71,20 @@ function mats() {
       aoMapIntensity: 1.35,
       ...M.concrete,
       envMapIntensity: 0.75,
+    }),
+    // Floor decals. transparent + depthWrite false, NOT alphaTest: these are
+    // soft low-contrast marks and an alpha cutout puts a hard stencil edge on
+    // every chalk line. depthWrite off also means the quads inside a cluster
+    // blend in array order instead of z-fighting each other on a shared plane.
+    decal: std({
+      map: decalAtlas(),
+      transparent: true,
+      depthWrite: false,
+      vertexColors: true, // vec4 — the alpha channel is the per-decal fade
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      roughness: 0.92,
+      metalness: 0,
     }),
     // envMapIntensity 1.0, not 0.65. The bowl was the one surface in the park
     // discounting the cool ambient while taking the warm hemisphere at full
@@ -217,9 +233,20 @@ function Plaza() {
       <mesh geometry={geo} receiveShadow material={m.plazaGround} />
       {/* landscaped band the trees stand in — a ring, never under the bowl */}
       <mesh geometry={grass} position-y={GRASS_Y} receiveShadow material={m.grass} />
+      <Decals />
       <Kerb />
     </>
   )
+}
+
+// Scuff, weeds, chalk, drains — one merged mesh of quads lying on the plaza.
+// 6mm up rather than coplanar: polygonOffset alone still z-fights at a grazing
+// angle across 70m of floor, which is exactly the angle this floor is seen at.
+function Decals() {
+  const geo = useMemo(() => buildDecalGeometry(), [])
+  const m = mats()
+  // no castShadow — a flat quad on the ground casts an acne stripe, not a shadow
+  return <mesh geometry={geo} position-y={0.006} receiveShadow material={m.decal} />
 }
 
 // Low masonry kerb ringing the play area — frames the park and stops the player.

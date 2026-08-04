@@ -19,12 +19,26 @@ const BACK = 24.9 // -> ~40 deg downward pitch
 const OFFSET = new THREE.Vector3(Math.sin(YAW) * BACK, HEIGHT, Math.cos(YAW) * BACK)
 
 // Title framing: a slow orbit around the parked dog, low and close enough that
-// the troika title (Intro.jsx, ~3.9m up) and the dog share the frame. The lens
-// is a 20.5 deg telephoto — half a frame is only ~3.2m tall at this radius, so
-// the radius and the aim height are solved together, not picked.
-const INTRO_R = 18
-const INTRO_H = 5.2
-const INTRO_AIM = 2.3
+// the troika title and the dog share the frame. The lens is a 20.5 deg
+// telephoto, so half a frame is only R*tan(10.25deg) tall — 2.5m here. The
+// title no longer stacks straight above the dog (Intro.jsx offsets it into the
+// upper-left of the frame instead), which is what buys the tighter radius:
+// only the DOG has to fit under the aim point now, not dog + 2.1m of type.
+const INTRO_R = 13
+const INTRO_H = 8.6 // ~27 deg down onto the dog (was ~10 deg, near eye level)
+// The aim is deliberately NOT on the dog: it sits above and to his right, which
+// puts him middle-LEFT of frame, clear of the PLAY button and under the title.
+// AIM 0.9 is roughly his own body height, so he lands just under the frame's
+// horizontal midline instead of the half-frame below it that AIM 1.9 gave.
+const INTRO_AIM = 0.9
+// Metres the aim slides along the camera's own right, AT ASPECT 1, and it is
+// multiplied by the live aspect below. Half-width IS half-height x aspect, so a
+// fixed slice of the frame scales linearly with aspect — the offset has to as
+// well, or the same number is a third of the way out on a monitor and off the
+// edge on a portrait phone. 1.64 against the ~2.64m half-height is 0.62 of
+// half-width, which is what clears the centred title (Intro.jsx MAX_W 0.42
+// -> +-0.42 of half-width) rather than parking the dog behind the letters.
+const INTRO_SIDE = 1.64
 const INTRO_SPIN = 0.05 // rad/s of drift, just enough to not read as a still
 const camPos = new THREE.Vector3()
 const camAim = new THREE.Vector3()
@@ -117,7 +131,19 @@ export default function CameraController() {
         introV.set(P.pos.x + Math.sin(a) * INTRO_R, P.pos.y + INTRO_H, P.pos.z + Math.cos(a) * INTRO_R),
         k,
       )
-      camAim.lerp(introV.set(P.pos.x, P.pos.y + INTRO_AIM, P.pos.z), k)
+      // camera-right in the horizontal plane at orbit angle `a` (at a = 0 the
+      // eye is on +Z looking back down -Z, so right is +X). Shifting the AIM
+      // right is what pushes the DOG left — the eye stays at INTRO_R, so his
+      // size and the title's scale are untouched.
+      const side = INTRO_SIDE * state.viewport.aspect
+      camAim.lerp(
+        introV.set(
+          P.pos.x + Math.cos(a) * side,
+          P.pos.y + INTRO_AIM,
+          P.pos.z - Math.sin(a) * side,
+        ),
+        k,
+      )
     }
 
     camera.position.copy(camPos)

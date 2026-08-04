@@ -230,12 +230,18 @@ export const RAILS = [
 ]
 
 // Handrail running alongside a stair collider. `off` is the sideways distance
-// from the stair's centreline; the default clears the tread by 0.5. stairB and
-// stairC have walls hugging both cheeks (deckA's retaining wall and front-edge
-// divider; stairC's two side walls), so the default offset put the rail and its
-// posts straight through them — those get an inset offset and the rail runs
-// over the treads instead. rails.check.js measures it.
-function handrail(s, side, color, off = s.w / 2 + 0.5, lift = 0.95) {
+// from the stair's centreline, and every handrail in the park runs INSIDE the
+// treads. It cannot go outside: Skatepark's Stairs draws a masonry STRINGER
+// wall down each cheek spanning |lx| = w/2 .. w/2 + 0.5, and the old default of
+// w/2 + 0.5 put the rail dead on that wall's outer face — stairA's two rails
+// were half-buried in their own stringers for the whole run (the tube is 0.055
+// and the masonry is opaque, so from most angles it just read as a yellow bar
+// lying on a wall). The stringer is drawn geometry, not a WALL row, which is
+// why nothing caught it; rails.check.js knows about it now.
+// stairB and stairC also have real walls hugging both cheeks (deckA's
+// retaining wall and front-edge divider; stairC's two side walls), so outside
+// was never an option there either. 0.7 in from the cheek on all three.
+function handrail(s, side, color, off = s.w / 2 - 0.7, lift = 0.95) {
   const c = Math.cos(s.rot)
   const sn = Math.sin(s.rot)
   const ox = off * side

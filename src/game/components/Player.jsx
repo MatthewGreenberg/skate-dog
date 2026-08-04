@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
 import { useControls } from 'leva'
 import { P } from '../store.js'
@@ -6,6 +7,9 @@ import Dog from './Dog.jsx'
 import Rider from './Rider.jsx'
 import { applyClearCoat } from './clearCoat.js'
 import { SIZE } from './dogFit.js'
+
+const UP_Y = new THREE.Vector3(0, 1, 0)
+const faceQ = new THREE.Quaternion()
 
 // Dog and rider are separate rigs under one transform: the root carries world
 // position + surface-aligned orientation, the dog rolls under the rider during
@@ -41,13 +45,28 @@ export default function Player() {
     SIZE.tall = tall
   }, [long, tall])
 
-  useFrame(() => {
+  useFrame((state) => {
     const g = root.current
     if (!g) return
     g.position.copy(P.pos)
     // curvature lift: keeps the long dog's nose/tail out of tight transitions
     g.position.addScaledVector(P.up, P.surfLift)
     g.quaternion.copy(P.quat)
+    // Title screen: the intro camera ORBITS (CameraController INTRO_SPIN), and a
+    // parked dog holding its spawn heading turns its back on it half the way
+    // round. So both rigs (the rider is a child of this group) face the lens
+    // while P.intro is up, blended out on the same smoothstep everything else in
+    // the reveal uses — the sim runs through the swoop, so this has to hand the
+    // real heading back rather than release it. Flat facing quat on purpose: the
+    // slerp levels any surface tilt only in proportion to a weight that is
+    // already decaying, and the spawn is flat plaza. PHOTO pins P.intro to 0, so
+    // captures never see this.
+    if (P.intro > 0) {
+      const k = P.intro * P.intro * (3 - 2 * P.intro)
+      const cam = state.camera.position
+      faceQ.setFromAxisAngle(UP_Y, Math.atan2(cam.x - P.pos.x, cam.z - P.pos.z))
+      g.quaternion.slerp(faceQ, k)
+    }
   })
   return (
     <group ref={root} scale={size}>

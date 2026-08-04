@@ -20,6 +20,7 @@
 // ponytail: footprints and samples, no mesh. Everything here is a box, a
 // cylinder or a line; a 10cm sample walk sees every overlap that matters.
 
+import * as THREE from 'three'
 import { RAILS, WALLS, PLANTERS, BENCHES, LAMPS, SOLIDS } from './levelData.js'
 
 let fails = 0
@@ -63,15 +64,21 @@ const rampTop = (s, px, pz) => {
 }
 
 // ---- walk every rail at 10cm ----------------------------------------------
+// Along the CURVE Skatepark draws, not the authored polyline: the tube is a
+// centripetal CatmullRomCurve3 (tension 0.2) and it bulges off the polyline at
+// the knees — 4.6cm on stairC's handrail, which is a tenth of that rail's
+// clearance to the stair's own side wall. The polyline walk cannot see it.
 function* samples(rail) {
-  for (let i = 0; i < rail.pts.length - 1; i++) {
-    const [a, b] = [rail.pts[i], rail.pts[i + 1]]
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])
-    const n = Math.max(1, Math.ceil(len / 0.1))
-    for (let k = 0; k <= n; k++) {
-      const t = k / n
-      yield [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-    }
+  const curve = new THREE.CatmullRomCurve3(
+    rail.pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])),
+    false,
+    'centripetal',
+    0.2,
+  )
+  const n = Math.max(2, Math.ceil(curve.getLength() / 0.1))
+  for (let k = 0; k <= n; k++) {
+    const p = curve.getPointAt(k / n)
+    yield [p.x, p.y, p.z]
   }
 }
 
@@ -122,10 +129,31 @@ for (const rail of RAILS) {
           once(`${rail.id}|s${s.id}`, `${rail.id} is buried in ${s.id} (top ${s.top}, rail y ${y.toFixed(2)})`)
         }
       } else {
+        // Stairs draw a masonry STRINGER down each cheek (Skatepark.jsx
+        // Stairs): local |lx| = w/2 .. w/2 + 0.5, depth d + 0.3, running
+        // y0 - 0.35 to y1 + 0.15. It is geometry, not a WALL row, so this is
+        // the only place it exists outside the renderer — and it is what
+        // stairA's two handrails shipped buried in.
+        if (s.kind === 'stairs') {
+          const [lx, lz] = local(x, z, s)
+          const a = Math.abs(lx)
+          if (
+            a > s.w / 2 - R &&
+            a < s.w / 2 + 0.5 + R &&
+            Math.abs(lz) < (s.d + 0.3) / 2 + R &&
+            y + RAIL_R > s.y0 - 0.35 &&
+            y - RAIL_R < s.y1 + 0.15
+          ) {
+            once(`${rail.id}|str${s.id}`, `${rail.id} runs through ${s.id}'s stringer wall`)
+          }
+        }
         const top = rampTop(s, x, z)
         if (top === null) continue
-        // its own handrail starts at the bottom step by design
-        if (rail.id.startsWith(`${s.id}-hr`)) continue
+        // Its own handrail is NOT exempt: stairB's and stairC's run inside the
+        // footprint, over the treads (off 2.0/1.7 against half-widths 2.5/2.2),
+        // so "above the surface" is exactly the invariant that keeps the tube
+        // off the steps. Measured 0.85 clear of the ramp line on both, and the
+        // drawn nosing stands at most one rise (0.32) above it.
         if (y - RAIL_R < top - 1e-6) {
           once(`${rail.id}|s${s.id}`, `${rail.id} is buried in ${s.id} (surface ${top.toFixed(2)}, rail y ${y.toFixed(2)})`)
         }

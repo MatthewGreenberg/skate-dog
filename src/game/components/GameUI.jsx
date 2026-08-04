@@ -26,6 +26,34 @@ function BoneIcon() {
   )
 }
 
+// four toes + a pad. Rotated outward so it reads as a print, not a flower.
+function PawIcon() {
+  return (
+    <svg className="hud-paw" viewBox="0 0 29 26" aria-hidden="true">
+      <ellipse cx="5.5" cy="12" rx="3.1" ry="4.1" transform="rotate(-22 5.5 12)" />
+      <ellipse cx="11" cy="7.2" rx="3.2" ry="4.3" transform="rotate(-8 11 7.2)" />
+      <ellipse cx="18" cy="7.2" rx="3.2" ry="4.3" transform="rotate(8 18 7.2)" />
+      <ellipse cx="23.5" cy="12" rx="3.1" ry="4.1" transform="rotate(22 23.5 12)" />
+      <ellipse cx="14.5" cy="19.2" rx="7.4" ry="5.7" />
+    </svg>
+  )
+}
+
+// stopwatch: crown bar + stem, a side button, and hands at 12-and-3
+function ClockIcon() {
+  return (
+    <svg className="hud-clock" viewBox="0 0 26 28" aria-hidden="true">
+      <g fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10 2.6h6" />
+        <path d="M13 2.6v3.2" />
+        <path d="M20.8 6.1l1.7 1.7" />
+        <circle cx="13" cy="16.6" r="9.1" />
+        <path d="M13 11.6v5h3.9" />
+      </g>
+    </svg>
+  )
+}
+
 function ScorePill() {
   const score = useGame((s) => s.score)
   const pillRef = useRef(null)
@@ -56,7 +84,7 @@ function ScorePill() {
 
   return (
     <div className="hud-pill hud-score" ref={pillRef}>
-      <BoneIcon />
+      <PawIcon />
       <span className="hud-score-value" ref={numRef}>
         0
       </span>
@@ -84,6 +112,7 @@ function TimePill() {
   }, [timeLeft])
   return (
     <div className={timeLeft <= 20 ? 'hud-pill hud-time is-urgent' : 'hud-pill hud-time'} ref={ref}>
+      <ClockIcon />
       <span className="hud-score-value">{mmss(timeLeft)}</span>
     </div>
   )
@@ -108,6 +137,28 @@ function GoalList() {
         )
       })}
     </div>
+  )
+}
+
+function XIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"
+      />
+    </svg>
+  )
+}
+
+function GitHubIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"
+      />
+    </svg>
   )
 }
 
@@ -144,6 +195,32 @@ function GoalMenu() {
       {open && (
         <div className="hud-sheet" onClick={() => setOpen(false)}>
           <div className="hud-sheet-card" onClick={(e) => e.stopPropagation()}>
+            <div className="hud-credit">
+              <div className="hud-credit-kicker">A WebGL experiment</div>
+              <div className="hud-credit-by">
+                Created by <strong>Matt Greenberg</strong>
+              </div>
+              <div className="hud-credit-links">
+                <a
+                  className="hud-credit-link"
+                  href="https://x.com/McGreenBeats"
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Matt Greenberg on X"
+                >
+                  <XIcon />
+                </a>
+                <a
+                  className="hud-credit-link"
+                  href="https://github.com/MatthewGreenberg"
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Matt Greenberg on GitHub"
+                >
+                  <GitHubIcon />
+                </a>
+              </div>
+            </div>
             <div className="hud-sheet-title">CHALLENGES</div>
             <GoalList />
             <div className="hud-sheet-foot">PAUSED — tap anywhere to resume</div>
@@ -307,16 +384,24 @@ function MuteWave() {
 
 const LEGEND = TOUCH
   ? [
-      ['Stick', 'move · spin · grab · flip'],
-      ['Button', 'jump'],
+      ['Stick', 'Move · Spin · Grab'],
+      ['Button', 'Jump'],
     ]
   : [
-      ['Space', 'jump'],
-      ['Arrows / WASD', 'move'],
-      ['↑ in air', 'grab'],
-      ['↓ in air', 'dogflip'],
-      ['← → in air', 'spin'],
+      ['Space', 'Jump'],
+      ['WASD', 'Move'],
+      ['↑', 'Grab'],
+      ['↓', 'Dogflip'],
+      ['← →', 'Spin'],
     ]
+
+function StarIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 1.6l3.2 6.5 7.2 1-5.2 5.1 1.2 7.2L12 18l-6.4 3.4 1.2-7.2L1.6 9.1l7.2-1z" />
+    </svg>
+  )
+}
 
 // ---------------------------------------------------------------- loading
 // The two glb rigs are ~9MB compressed and every texture in the park is painted
@@ -324,15 +409,64 @@ const LEGEND = TOUCH
 // DefaultLoadingManager via drei.
 function LoadingScreen({ progress }) {
   const pct = Math.round(progress)
+  const phase =
+    pct >= 100
+      ? 'Ready to roll!'
+      : pct > 66
+        ? 'Hiding the bonus bones…'
+        : pct > 32
+          ? 'Warming up the wheels…'
+          : 'Waking up the skatepark…'
+
   return (
-    <div className="hud-load">
-      <div className="hud-load-label">loading</div>
-      <div className="hud-load-bar">
-        <div className="hud-load-fill" style={{ width: `${pct}%` }} />
-        <div className="hud-load-marker" style={{ left: `${pct}%` }}>
-          <BoneIcon />
-        </div>
+    <div
+      className="hud-load hud-load-paw-screen"
+      role="status"
+      aria-live="polite"
+      aria-label={`Loading Skate Dog, ${pct} percent`}
+      style={{
+        '--load': pct,
+        '--load-ratio': Math.max(0.015, pct / 100),
+        '--load-shine-offset': `${80 - pct * 2.1}px`,
+      }}
+    >
+      <span className="hud-load-paw-kicker">SKATE DOG</span>
+      <div className="hud-load-paw-meter" aria-hidden="true">
+        <svg className="hud-load-paw" viewBox="0 0 220 210">
+          <defs>
+            <clipPath id="loading-paw-shape">
+              <ellipse cx="41" cy="78" rx="18" ry="25" transform="rotate(-24 41 78)" />
+              <ellipse cx="83" cy="46" rx="20" ry="27" transform="rotate(-8 83 46)" />
+              <ellipse cx="137" cy="46" rx="20" ry="27" transform="rotate(8 137 46)" />
+              <ellipse cx="179" cy="78" rx="18" ry="25" transform="rotate(24 179 78)" />
+              <path d="M110 91c-17 0-29 10-40 24-10 13-17 28-15 42 3 22 25 34 55 34s52-12 55-34c2-14-5-29-15-42-11-14-23-24-40-24Z" />
+            </clipPath>
+          </defs>
+
+          <g className="hud-load-paw-base">
+            <ellipse cx="41" cy="78" rx="18" ry="25" transform="rotate(-24 41 78)" />
+            <ellipse cx="83" cy="46" rx="20" ry="27" transform="rotate(-8 83 46)" />
+            <ellipse cx="137" cy="46" rx="20" ry="27" transform="rotate(8 137 46)" />
+            <ellipse cx="179" cy="78" rx="18" ry="25" transform="rotate(24 179 78)" />
+            <path d="M110 91c-17 0-29 10-40 24-10 13-17 28-15 42 3 22 25 34 55 34s52-12 55-34c2-14-5-29-15-42-11-14-23-24-40-24Z" />
+          </g>
+
+          <g clipPath="url(#loading-paw-shape)">
+            <rect className="hud-load-paw-fill" x="0" y="0" width="220" height="210" />
+            <path className="hud-load-paw-shine" d="M18 118c49-20 113-22 184-3v25c-73-19-137-17-184 4Z" />
+          </g>
+
+          <g className="hud-load-paw-outline">
+            <ellipse cx="41" cy="78" rx="18" ry="25" transform="rotate(-24 41 78)" />
+            <ellipse cx="83" cy="46" rx="20" ry="27" transform="rotate(-8 83 46)" />
+            <ellipse cx="137" cy="46" rx="20" ry="27" transform="rotate(8 137 46)" />
+            <ellipse cx="179" cy="78" rx="18" ry="25" transform="rotate(24 179 78)" />
+            <path d="M110 91c-17 0-29 10-40 24-10 13-17 28-15 42 3 22 25 34 55 34s52-12 55-34c2-14-5-29-15-42-11-14-23-24-40-24Z" />
+          </g>
+        </svg>
       </div>
+      <strong className="hud-load-paw-percent">{pct}%</strong>
+      <p className="hud-load-paw-status">{phase}</p>
     </div>
   )
 }
@@ -342,6 +476,11 @@ function StartOverlay() {
   // fade and the 3D reveal are the same 0.26s. Unmount comes free: GameUI drops
   // the overlay the moment start() lands.
   const [out, setOut] = useState(false)
+  // The eight rows are COLLAPSED by default: on the start card they compete with
+  // the title for the same half of the frame, and the count is the only part you
+  // read before you've played once.
+  const [showGoals, setShowGoals] = useState(false)
+  const goalsDone = useGame((s) => s.goalsDone)
   const onPlay = () => {
     if (out) return
     setOut(true)
@@ -360,23 +499,39 @@ function StartOverlay() {
   })
   return (
     <div className={out ? 'hud-start is-out' : 'hud-start'}>
-      {/* the SKATE DOG title is troika text in the scene — see Intro.jsx */}
-      <div className="hud-sheet-card is-brief">
-        <div className="hud-sheet-title">CHALLENGES</div>
-        <GoalList />
+      {/* the SKATE DOG title is troika text in the scene, upper LEFT — Intro.jsx
+          places it in camera space, so this card owns the upper right */}
+      <div className="hud-brief">
+        <div className="hud-brief-head">CHALLENGES</div>
+        <p className="hud-brief-sub">Complete tricks and explore the park</p>
+        <div className="hud-brief-count">
+          <StarIcon className="hud-brief-star" />
+          <b>
+            {goalsDone.length} / {GOALS.length}
+          </b>
+          completed
+        </div>
+        <button className="hud-brief-more" onClick={() => setShowGoals((v) => !v)}>
+          {showGoals ? 'Hide challenges' : 'View challenges'}
+          <span className={showGoals ? 'is-open' : undefined}>›</span>
+        </button>
+        {showGoals && <GoalList />}
       </div>
+      <button className="hud-play" onClick={onPlay}>
+        <StarIcon className="hud-play-star" />
+        PLAY
+        <StarIcon className="hud-play-star" />
+      </button>
+      <span className="hud-hint">or press Enter</span>
       <div className="hud-legend">
         {LEGEND.map(([key, what]) => (
           <div key={key}>
             <b>{key}</b>
+            <i>=</i>
             {what}
           </div>
         ))}
       </div>
-      <button className="hud-play" onClick={onPlay}>
-        PLAY
-      </button>
-      <span className="hud-hint">or press Enter</span>
     </div>
   )
 }

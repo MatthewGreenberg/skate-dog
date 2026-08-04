@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { P, useGame, on } from '../store.js'
+import { PHOTO, PHOTO_TIME } from '../photo.js'
 
 // CPU-simulated particle pools. One InstancedMesh per pool, buffers allocated
 // once at module scope, no allocation inside the frame loop. Instances have no
@@ -90,6 +91,25 @@ const ringMat = new THREE.MeshBasicMaterial({
 // as the can it came out of, or it reads as another particle effect.
 const trashGeo = new THREE.BoxGeometry(1, 0.72, 0.12)
 const trashMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85, flatShading: true })
+
+// Ambient air: dust motes. ponytail: no pool, no spawner, no lifetimes —
+// position is analytic in (index, time) and the field WRAPS around the camera,
+// so nothing is ever allocated, expired or respawned. Seeds are golden-ratio
+// sequences rather than Math.random so photo captures stay comparable run to
+// run (same reason the wind clock is pinned). Drifting leaves lived here too
+// and were cut by request.
+const MOTE_N = 220
+const AMB_R = 13 // half-extent of the wrap box, horizontal
+const AMB_RY = 5
+
+const moteGeo = new THREE.CircleGeometry(1, 6)
+const moteMat = new THREE.MeshBasicMaterial({
+  color: '#fff4e0',
+  toneMapped: false, // under the bloom threshold: a mote glints, it doesn't glow
+  transparent: true,
+  opacity: 0.3,
+  depthWrite: false,
+})
 
 const streakGeo = new THREE.BoxGeometry(0.03, 0.03, 1)
 const streakMat = new THREE.MeshBasicMaterial({
@@ -370,6 +390,72 @@ function pushColors(mesh, p) {
   mesh.instanceColor.needsUpdate = true
 }
 
+const fract = (v) => v - Math.floor(v)
+// low-discrepancy: irrational strides spread N samples evenly with no prng
+// state to carry and no seed order to accidentally couple to another stream
+const AMB_K = [0.7548776662, 0.5698402910, 0.8191725134, 0.3819660113]
+const ambSeed = (i, k) => fract(0.5 + (i + 1) * AMB_K[k])
+
+/** Wrap v into [-r, r]. The offset field is infinite because it is periodic. */
+function wrapTo(v, r) {
+  const d = 2 * r
+  return (((v + r) % d) + d) % d - r
+}
+
+// Shrink to nothing at the box faces and at the ground, or particles pop in
+// and out at the wrap seam and clip through the paving.
+function ambFade(dx, dy, dz, y) {
+  const k = Math.max(Math.abs(dx), Math.abs(dz)) / AMB_R
+  const ky = Math.abs(dy) / AMB_RY
+  return Math.min(1, (1 - Math.max(k, ky)) / 0.22, y / 0.7)
+}
+
+// The field CARRIES with the camera, at a lag. Anchored to the world instead,
+// every particle is a fixed lattice point and the chase camera does 13 m/s
+// through it — the leaves streamed past sideways and crossed the whole 26m box
+// in 2s, which reads as debris in a gale, not as drift. Following the camera
+// exactly is the other failure (leaves pinned to your speed, no parallax at
+// all), so the centre is damped: it settles to the camera's velocity on a
+// straight line and falls behind on every turn, pop and stop, which is where
+// the parallax comes from.
+const _ambC = new THREE.Vector3()
+let ambInit = false
+
+function stepAmbient(moteMesh, T, cam, low, dt) {
+  if (PHOTO || !ambInit) {
+    _ambC.copy(cam.position) // captures must not depend on how we got here
+    ambInit = true
+  } else {
+    _ambC.lerp(cam.position, 1 - Math.exp(-1.1 * dt))
+  }
+  const cx = _ambC.x
+  const cy = _ambC.y
+  const cz = _ambC.z
+  const nM = low ? MOTE_N >> 1 : MOTE_N
+  for (let i = 0; i < MOTE_N; i++) {
+    const a = ambSeed(i, 0)
+    const b = ambSeed(i, 1)
+    const c = ambSeed(i, 2)
+    const ph = a * TAU + i
+    // motes RISE — this is sunlit dust hanging in the air, not falling debris
+    const ox = wrapTo((a * 2 - 1) * AMB_R + Math.sin(T * 0.06 + ph) * 1.3, AMB_R)
+    const oy = wrapTo((b * 2 - 1) * AMB_RY + T * 0.025 + Math.sin(T * 0.14 + ph) * 0.35, AMB_RY)
+    const oz = wrapTo((c * 2 - 1) * AMB_R + Math.cos(T * 0.045 + ph * 1.7) * 1.3, AMB_R)
+    const y = cy + oy
+    const f = i < nM ? ambFade(ox, oy, oz, y) : 0
+    if (f <= 0) {
+      moteMesh.setMatrixAt(i, ZERO)
+      continue
+    }
+    _o.position.set(cx + ox, y, cz + oz)
+    _o.quaternion.copy(cam.quaternion)
+    _o.scale.setScalar((0.012 + c * 0.02) * f)
+    _o.updateMatrix()
+    moteMesh.setMatrixAt(i, _o.matrix)
+  }
+  moteMesh.instanceMatrix.needsUpdate = true
+}
+
 function stepDust(mesh, dt) {
   const drag = Math.exp(-3.4 * dt)
   for (let i = 0; i < DUST_N; i++) {
@@ -540,6 +626,7 @@ export default function Effects() {
   const ringRef = useRef()
   const streakRef = useRef()
   const trashRef = useRef()
+  const moteRef = useRef()
   const t = useRef({ dust: 0, spark: 0, trail: 0, streak: 0, grindT: 0, grindStar: 0, airStar: 0, bigAir: false })
 
   // Must be a layout effect: useFrame subscribes in a layout effect too, so a
@@ -547,7 +634,7 @@ export default function Effects() {
   // three only reads `usage` when it first creates the buffer, so setting it
   // late would silently leave these buffers as STATIC_DRAW forever.
   useLayoutEffect(() => {
-    for (const m of [dustRef.current, sparkRef.current, trailRef.current, starRef.current, ringRef.current, streakRef.current, trashRef.current]) {
+    for (const m of [dustRef.current, sparkRef.current, trailRef.current, starRef.current, ringRef.current, streakRef.current, trashRef.current, moteRef.current]) {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     }
     // instanceColor is created lazily by setColorAt, but we write the whole
@@ -756,10 +843,13 @@ export default function Effects() {
     stepRings(ringRef.current, dt)
     stepStreaks(streakRef.current, dt)
     stepTrash(trashRef.current, dt)
+    stepAmbient(moteRef.current, PHOTO ? PHOTO_TIME : state.clock.elapsedTime, state.camera, low, dt)
   })
 
   return (
     <>
+      {/* ambient air, always on — wraps around the camera, so no culling */}
+      <instancedMesh ref={moteRef} args={[moteGeo, moteMat, MOTE_N]} frustumCulled={false} renderOrder={2} />
       <instancedMesh ref={trailRef} args={[trailGeo, trailMat, TRAIL_N]} frustumCulled={false} renderOrder={1} />
       <instancedMesh ref={dustRef} args={[dustGeo, dustMat, DUST_N]} frustumCulled={false} renderOrder={2} />
       <instancedMesh ref={ringRef} args={[ringGeo, ringMat, RING_N]} frustumCulled={false} renderOrder={3} />

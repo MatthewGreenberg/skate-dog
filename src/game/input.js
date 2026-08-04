@@ -133,8 +133,20 @@ export function initInput() {
 
 const BUFFER = 0.14
 
-export function sampleInput(dt) {
-  input.steer = (down.has('right') ? 1 : 0) - (down.has('left') ? 1 : 0)
+export function sampleInput(dt, dead = false) {
+  // Run over: the sim still steps (the dog rolls to a stop under the
+  // scorecard) but nothing you press reaches it. Zeroed EVERY frame, not once
+  // — a key held when the clock ran out is still in `down`, and the touch
+  // stick is read straight off `touch` by PlayerController.
+  if (dead) {
+    input.steer = input.throttle = input.spin = input.jumpBuffer = 0
+    input.reverse = input.brake = input.jump = input.jumpHeld = false
+    input.dogSpin = input.grab = false
+    touch.active = touch.jumpHeld = false
+    jumpEdge = dogSpinEdge = false
+    return input
+  }
+  input.steer =(down.has('right') ? 1 : 0) - (down.has('left') ? 1 : 0)
   input.throttle = down.has('fwd') ? 1 : 0
   input.reverse = down.has('back')
   input.brake = down.has('brake')

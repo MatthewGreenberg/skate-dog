@@ -10,9 +10,16 @@
      with the viewport. 11px @ 700w -> 16.5px @ 1440w -> 22.7px @ 2560w. */
   --u: clamp(11px, 0.55vw + 8.6px, 26px);
   --edge: calc(var(--u) * 1.45);
-  --rim: max(2px, calc(var(--u) / 8));
-  --ink: rgba(40, 17, 70, 0.55);
+  /* hairline, not a sticker outline: at u/8 the white rim was the loudest edge
+     in the frame and read as a mobile-game chrome kit stuck over the park */
+  --rim: max(1.5px, calc(var(--u) / 14));
+  --ink: rgba(40, 17, 70, 0.5);
 }
+
+/* The upper-frame haze wash lived here (a screen-space FOG_COLOR gradient on
+   .hud::before) and was removed by request — the sky reads clean now. Don't
+   reach for three's Fog to bring it back: it is keyed on DEPTH, so hazing the
+   top of a chase frame veils the hero too. */
 
 .hud-widgets {
   position: absolute;
@@ -33,9 +40,11 @@
   padding: 0 calc(var(--u) * 1.3) 0 calc(var(--u) * 0.95);
   border-radius: 999px;
   background: linear-gradient(rgba(96, 54, 160, 0.66), rgba(58, 28, 106, 0.72));
-  border: var(--rim) solid rgba(255, 255, 255, 0.95);
-  box-shadow: 0 calc(var(--u) * 0.5) calc(var(--u) * 1.15) rgba(36, 14, 62, 0.42),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  border: var(--rim) solid rgba(255, 255, 255, 0.62);
+  /* contact shadow, not a float: the old 1.15u blur at 0.42 detached the pill
+     from the park and smeared a dark halo over the pastel sky */
+  box-shadow: 0 calc(var(--u) * 0.18) calc(var(--u) * 0.45) rgba(36, 14, 62, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -56,11 +65,18 @@
 
 /* The run clock, top centre — the one number you check without looking away
    from the dog, so it sits on the axis your eye is already on. */
+/* Hierarchy is carried by COLOUR, not by weight: the clock is a rose sticker
+   against the score's purple, so the two never read as one widget row even
+   though both are filled pills. Its rim is deliberately heavier than the
+   hairline — this one element is a sticker on purpose. */
 .hud-time {
   top: var(--edge);
   left: 50%;
   transform: translateX(-50%);
-  padding: 0 calc(var(--u) * 1.3);
+  padding: 0 calc(var(--u) * 1.35) 0 calc(var(--u) * 1.05);
+  background: linear-gradient(rgba(206, 84, 108, 0.94), rgba(168, 44, 80, 0.96));
+  border-width: calc(var(--rim) * 1.6);
+  border-color: rgba(255, 255, 255, 0.94);
 }
 /* .hud-pill.pop is a bare scale() and would drop the centring transform, so
    the clock gets its own keyframes with the translate baked in. */
@@ -73,10 +89,19 @@
   100% { transform: translateX(-50%) scale(1); }
 }
 .hud-time .hud-score-value {
-  font-size: calc(var(--u) * 2.2);
+  font-size: calc(var(--u) * 2);
+  letter-spacing: 0.01em;
 }
+.hud-clock {
+  flex: none;
+  width: calc(var(--u) * 1.85);
+  height: calc(var(--u) * 1.85);
+  filter: drop-shadow(0 1px 2px rgba(70, 18, 40, 0.35));
+}
+/* urgent is a DEEPER rose plus the pulse, not a colour change — the pill is
+   already red, so switching hue here would read as a different widget. */
 .hud-time.is-urgent {
-  background: linear-gradient(rgba(196, 54, 92, 0.72), rgba(140, 26, 66, 0.78));
+  background: linear-gradient(rgba(190, 40, 74, 0.96), rgba(138, 18, 56, 0.98));
   animation: hudTimeUrgent 1s ease-in-out infinite;
 }
 @keyframes hudTimeUrgent {
@@ -147,7 +172,7 @@
   height: calc(var(--u) * 3.5);
   padding: 0 calc(var(--u) * 1.15);
   border-radius: 999px;
-  border: var(--rim) solid rgba(255, 255, 255, 0.9);
+  border: var(--rim) solid rgba(255, 255, 255, 0.62);
   background: linear-gradient(rgba(96, 54, 160, 0.66), rgba(58, 28, 106, 0.72));
   color: #fff;
   font: inherit;
@@ -159,6 +184,8 @@
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
 }
+/* NOT faded when idle — a dimmed interactive control reads as DISABLED, not as
+   quiet, and this is the only door into the challenge list mid-run. */
 .hud-menu.is-open { background: linear-gradient(#ffe14d, #f0b93a); color: #3a2358; }
 .hud-menu-bars {
   width: calc(var(--u) * 1.35);
@@ -192,11 +219,64 @@
   background: linear-gradient(rgba(96, 54, 160, 0.82), rgba(58, 28, 106, 0.88));
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  max-width: min(92vw, calc(var(--u) * 28));
 }
-/* on the start card it's a briefing, not a modal — it sits in the column flow */
-.hud-sheet-card.is-brief {
-  background: rgba(64, 38, 110, 0.4);
-  text-align: left;
+.hud-credit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 0.35);
+  margin: 0 0 calc(var(--u) * 1.15);
+  padding-bottom: calc(var(--u) * 1.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  text-align: center;
+}
+.hud-credit-kicker {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: calc(var(--u) * 0.82);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.hud-credit-by {
+  color: #fff;
+  font-size: calc(var(--u) * 1.15);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 2px var(--ink);
+}
+.hud-credit-by strong {
+  color: #ffe14d;
+  font-weight: 900;
+}
+.hud-credit-links {
+  display: flex;
+  gap: calc(var(--u) * 0.55);
+  margin-top: calc(var(--u) * 0.35);
+}
+.hud-credit-link {
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 2.6);
+  height: calc(var(--u) * 2.6);
+  border-radius: 999px;
+  border: var(--rim) solid rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    transform 0.15s ease;
+}
+.hud-credit-link svg {
+  width: calc(var(--u) * 1.25);
+  height: calc(var(--u) * 1.25);
+}
+.hud-credit-link:hover,
+.hud-credit-link:focus-visible {
+  background: #ffe14d;
+  border-color: #ffe14d;
+  color: #3a2358;
+  transform: translateY(calc(var(--u) * -0.12));
+  outline: none;
 }
 .hud-sheet-foot {
   margin-top: calc(var(--u) * 0.9);
@@ -205,7 +285,6 @@
   font-weight: 700;
   letter-spacing: 0.08em;
 }
-.hud-sheet-card.is-brief .hud-sheet-foot { display: none; }
 .hud-sheet-title {
   margin-bottom: calc(var(--u) * 0.7);
   color: #ffe14d;
@@ -219,17 +298,28 @@
   flex: none;
   width: calc(var(--u) * 2.4);
   height: calc(var(--u) * 1.42);
-  filter: drop-shadow(0 2px 3px rgba(40, 18, 70, 0.45));
+  filter: drop-shadow(0 1px 2px rgba(40, 18, 70, 0.35));
+}
+
+/* the score is not a bone count — bones are their own collectible with their
+   own pop and chime. A paw is the game's own mark and doesn't lie about what
+   the number is. */
+.hud-paw {
+  flex: none;
+  width: calc(var(--u) * 1.9);
+  height: calc(var(--u) * 1.7);
+  fill: #fff;
+  filter: drop-shadow(0 1px 2px rgba(40, 18, 70, 0.35));
 }
 
 .hud-score-value {
   color: #fff;
-  font-size: calc(var(--u) * 1.9);
-  font-weight: 800;
+  font-size: calc(var(--u) * 2.1);
+  font-weight: 900;
   line-height: 1;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 2px 5px var(--ink);
+  text-shadow: 0 1px 2px var(--ink);
 }
 
 
@@ -285,51 +375,101 @@
   100% { opacity: 0; transform: translate(-50%, -70%) scale(0.98); }
 }
 
-/* ------------------------------------------------------------ loading */
-.hud-load {
+
+/* One visual idea, one progress cue: the real load level fills the paw. */
+.hud-load.hud-load-paw-screen {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: calc(var(--u) * 1.1);
-  padding: var(--edge);
+  gap: calc(var(--u) * 0.65);
+  padding: max(var(--edge), env(safe-area-inset-top)) var(--edge)
+    max(var(--edge), env(safe-area-inset-bottom));
+  color: #fff8e9;
   text-align: center;
-  background: radial-gradient(120% 100% at 50% 38%, #ffd9b4, #6f42a4);
+  background:
+    radial-gradient(circle at 50% 44%, rgba(255, 222, 160, 0.42), transparent 34%),
+    linear-gradient(155deg, #7650ad 0%, #a96cb7 48%, #f2a0ae 100%);
 }
-.hud-load-label {
-  color: #fff;
-  font-size: calc(var(--u) * 1.4);
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-shadow: 0 2px 5px var(--ink);
-}
-.hud-load-bar {
+.hud-load.hud-load-paw-screen::after { content: none; }
+.hud-load-paw-kicker {
   position: relative;
-  width: min(calc(var(--u) * 24), 74vw);
-  height: calc(var(--u) * 1.15);
-  border-radius: 999px;
-  border: var(--rim) solid rgba(255, 255, 255, 0.92);
-  background: rgba(64, 30, 110, 0.42);
-  box-shadow: inset 0 2px 6px rgba(40, 14, 70, 0.4);
+  z-index: 2;
+  color: rgba(255, 248, 235, 0.88);
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 1000;
+  letter-spacing: 0.22em;
+  text-shadow: 0 2px 4px rgba(57, 27, 88, 0.24);
 }
-.hud-load-fill {
+.hud-load-paw-meter {
+  position: relative;
+  z-index: 2;
+  width: min(calc(var(--u) * 15), 52vw, 32vh);
+  aspect-ratio: 1;
+  margin: calc(var(--u) * 0.35) 0 calc(var(--u) * 0.15);
+}
+.hud-load-paw {
+  display: block;
+  width: 100%;
   height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #ffd27a, #ff9ecb);
-  transition: width 0.3s ease-out;
+  overflow: visible;
+  filter: drop-shadow(0 calc(var(--u) * 0.6) calc(var(--u) * 0.72) rgba(67, 31, 100, 0.26));
 }
-.hud-load-marker {
-  position: absolute;
-  top: 50%;
-  width: calc(var(--u) * 2.2);
-  transform: translate(-50%, -50%);
-  transition: left 0.3s ease-out;
+.hud-load-paw-base {
+  fill: rgba(76, 40, 118, 0.34);
+}
+.hud-load-paw-fill {
+  fill: #ffd56d;
+  transform: scaleY(var(--load-ratio));
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  transition: transform 0.72s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+.hud-load-paw-shine {
+  fill: rgba(255, 246, 194, 0.24);
+  transform: translateY(var(--load-shine-offset));
+  transition: transform 0.72s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.hud-load-paw-outline {
+  fill: none;
+  stroke: rgba(255, 250, 239, 0.98);
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.hud-load-paw-percent {
+  position: relative;
+  z-index: 2;
+  color: #fff8e9;
+  font-size: calc(var(--u) * 2.2);
+  font-weight: 1000;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  text-shadow: 0 calc(var(--u) * 0.2) 0 #68409a;
+}
+.hud-load-paw-status {
+  position: relative;
+  z-index: 2;
+  min-width: min(84vw, calc(var(--u) * 25));
+  margin: calc(var(--u) * 0.15) 0 0;
+  color: rgba(255, 248, 235, 0.88);
+  font-size: calc(var(--u) * 1.02);
+  font-weight: 800;
+  text-shadow: 0 2px 4px rgba(57, 27, 88, 0.28);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-load-paw-fill,
+  .hud-load-paw-shine { transition-duration: 0.001ms; }
 }
 /* ------------------------------------------------------------ start */
 /* Bottom-anchored on purpose: the title is troika text floating in the park
-   (Intro.jsx), so the top two thirds of the frame have to stay clear. */
+   (Intro.jsx), so the top two thirds of the frame have to stay clear — the
+   briefing card is absolutely placed into the one top corner the title isn't. */
 .hud-start {
   position: absolute;
   inset: 0;
@@ -337,11 +477,105 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: calc(var(--u) * 0.95);
-  padding: var(--edge) var(--edge) calc(var(--u) * 3);
+  gap: calc(var(--u) * 0.7);
+  padding: var(--edge) var(--edge) calc(var(--u) * 2.2);
   text-align: center;
-  background: linear-gradient(rgba(112, 66, 164, 0) 34%, rgba(92, 52, 148, 0.5) 72%, rgba(70, 36, 122, 0.72));
+  /* light, not a vignette: the park behind this card is a pastel sunset and a
+     purple scrim over the bottom third read as a dimmed screenshot */
+  background: linear-gradient(rgba(112, 66, 164, 0) 52%, rgba(96, 56, 152, 0.24) 82%, rgba(74, 40, 126, 0.42));
   animation: hudFade 0.6s ease-out;
+}
+
+/* ------------------------------------------------------------ briefing card */
+.hud-brief {
+  position: absolute;
+  top: var(--edge);
+  right: var(--edge);
+  width: min(calc(var(--u) * 19), 46vw);
+  padding: calc(var(--u) * 1.15) calc(var(--u) * 1.25);
+  border-radius: calc(var(--u) * 1.15);
+  background: rgba(253, 249, 243, 0.94);
+  box-shadow: 0 calc(var(--u) * 0.7) calc(var(--u) * 1.7) rgba(46, 20, 78, 0.28);
+  text-align: left;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.hud-brief-head {
+  color: #5b2fa8;
+  font-size: calc(var(--u) * 1.2);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+.hud-brief-sub {
+  margin: calc(var(--u) * 0.42) 0 0;
+  color: #4a3a63;
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.hud-brief-count {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.38);
+  margin-top: calc(var(--u) * 0.6);
+  padding-bottom: calc(var(--u) * 0.75);
+  border-bottom: 1px solid rgba(90, 50, 150, 0.16);
+  color: #6b5b83;
+  font-size: calc(var(--u) * 0.92);
+  font-weight: 600;
+}
+.hud-brief-count b {
+  color: #2f1d4d;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.hud-brief-star {
+  flex: none;
+  width: calc(var(--u) * 1.2);
+  height: calc(var(--u) * 1.2);
+  fill: #7b4fd0;
+}
+.hud-brief-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 0.6);
+  width: 100%;
+  margin-top: calc(var(--u) * 0.75);
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 0.9);
+  border-radius: 999px;
+  border: 1px solid rgba(123, 79, 208, 0.22);
+  background: #fff;
+  color: #5b2fa8;
+  font: inherit;
+  font-size: calc(var(--u) * 0.96);
+  font-weight: 800;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 calc(var(--u) * 0.2) calc(var(--u) * 0.5) rgba(46, 20, 78, 0.12);
+  transition: transform 0.14s ease, background 0.14s ease;
+}
+.hud-brief-more:hover { transform: translateY(-1px); background: #f6efff; }
+.hud-brief-more span {
+  font-size: calc(var(--u) * 1.4);
+  line-height: 0.7;
+  transition: transform 0.18s ease;
+}
+.hud-brief-more span.is-open { transform: rotate(90deg); }
+/* the list is cream-on-dark everywhere else; inside this card it's the inverse */
+.hud-brief .hud-goals { margin-top: calc(var(--u) * 0.75); }
+.hud-brief .hud-goal { color: #3c2a5c; text-shadow: none; }
+.hud-brief .hud-goal i { border-color: rgba(90, 50, 150, 0.4); }
+.hud-brief .hud-goal span { opacity: 0.55; }
+.hud-brief .hud-goal.is-got {
+  color: #9a7508;
+  text-decoration-color: rgba(154, 117, 8, 0.5);
+}
+.hud-brief .hud-goal.is-got i {
+  background: #e8b60c;
+  border-color: #e8b60c;
+  box-shadow: none;
 }
 /* click PLAY: the card drops away while the camera starts its swoop */
 .hud-start.is-out {
@@ -361,42 +595,59 @@
   font-weight: 600;
   letter-spacing: 0.06em;
 }
+/* ONE cream bar with hairline dividers, not five floating pills: five pills over
+   a busy park is five silhouettes to parse, and the ref reads as a single strip
+   of chrome under the button. */
 .hud-legend {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: calc(var(--u) * 0.48);
-  max-width: calc(var(--u) * 33);
+  margin-top: calc(var(--u) * 0.7);
+  padding: calc(var(--u) * 0.45) calc(var(--u) * 0.55);
+  border-radius: 999px;
+  background: rgba(253, 249, 243, 0.93);
+  box-shadow: 0 calc(var(--u) * 0.4) calc(var(--u) * 1.2) rgba(46, 20, 78, 0.25);
+  max-width: min(calc(var(--u) * 44), 94vw);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 .hud-legend > div {
   display: flex;
   align-items: center;
-  gap: calc(var(--u) * 0.42);
-  padding: calc(var(--u) * 0.3) calc(var(--u) * 0.78) calc(var(--u) * 0.3) calc(var(--u) * 0.3);
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  background: rgba(64, 38, 110, 0.4);
-  color: #fff;
-  font-size: calc(var(--u) * 0.79);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  gap: calc(var(--u) * 0.34);
+  padding: calc(var(--u) * 0.12) calc(var(--u) * 0.72);
+  color: #4a3a63;
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.hud-legend > div + div {
+  border-left: 1px solid rgba(90, 50, 150, 0.18);
+}
+.hud-legend i {
+  font-style: normal;
+  opacity: 0.45;
 }
 .hud-legend b {
-  padding: calc(var(--u) * 0.18) calc(var(--u) * 0.48);
-  border-radius: calc(var(--u) * 0.48);
+  padding: calc(var(--u) * 0.24) calc(var(--u) * 0.6);
+  border-radius: calc(var(--u) * 0.5);
+  border: 1px solid rgba(90, 50, 150, 0.16);
   background: #fff;
-  color: #3a2358;
-  font-size: calc(var(--u) * 0.73);
+  box-shadow: 0 1px 2px rgba(46, 20, 78, 0.12);
+  color: #2f1d4d;
+  font-size: calc(var(--u) * 0.88);
   font-weight: 800;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
 }
 
 .hud-play {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 1.05);
   pointer-events: auto;
   margin-top: calc(var(--u) * 0.5);
-  padding: calc(var(--u) * 0.9) calc(var(--u) * 3.5);
+  padding: calc(var(--u) * 0.85) calc(var(--u) * 2.6);
   border-radius: 999px;
   border: calc(var(--rim) * 1.5) solid rgba(255, 255, 255, 0.92);
   background: linear-gradient(#9a6ee2, #6d3fc0);
@@ -417,6 +668,12 @@
 }
 .hud-play:active {
   transform: translateY(1px) scale(0.98);
+}
+.hud-play-star {
+  width: calc(var(--u) * 1.5);
+  height: calc(var(--u) * 1.5);
+  fill: #ffd24d;
+  filter: drop-shadow(0 2px 0 rgba(140, 92, 16, 0.55));
 }
 
 /* ------------------------------------------------------------ scorecard */

@@ -9,8 +9,11 @@ const DEV = import.meta.env.DEV
 // AdaptiveDpr drops resolution while the regression flag is set.
 export default function PerformanceManager() {
   const setQuality = useGame((s) => s.setQuality)
+  const warmedUp = useGame((s) => s.warmedUp)
   // a screenshot must never be taken at a degraded quality tier
-  if (PHOTO) return null
+  // Warm-up frames are intentionally expensive and must not poison the live
+  // performance sample or trigger a quality flip while targets are allocating.
+  if (PHOTO || !warmedUp) return null
   return (
     <>
       {/* flipflops: every quality change rebuilds the effect composer's render

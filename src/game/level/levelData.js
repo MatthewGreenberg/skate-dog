@@ -183,11 +183,10 @@ export const WALLS = [
 
 // ---------------------------------------------------------------- planters
 export const PLANTERS = [
-  // The two beds that used to sit at (-26,8) and (-34,16) are gone: they stood
-  // squarely in the only run-in to the halfpipe, so every approach was a slalom
-  // between them. Their greenery moved to (-35.5,24.5) — alongside the pipe,
-  // against the west kerb, out of the lane.
-  { x: -35.5, z: 24.5, w: 3, d: 6, h: 0.95, plant: 'tree' },
+  // Nothing lives beside the halfpipe. The two beds at (-26,8) and (-34,16)
+  // stood in the only run-in and made every approach a slalom; the one that
+  // replaced them at (-35.5,24.5) — against the west kerb alongside the pipe —
+  // was removed by request. Don't put planters back in the pipe's corner.
   { x: -29, z: -22, w: 5, d: 6, h: 0.95, plant: 'tree' },
   { x: -4, z: -25, w: 6, d: 4, h: 0.95, plant: 'tree' },
   { x: 9, z: -28, w: 5, d: 4, base: DECK, h: 0.95, plant: 'tree' },

@@ -1,7 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { Canvas, useFrame } from '@react-three/fiber'
-import { Preload } from '@react-three/drei'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { EffectComposer, N8AO, Bloom, Vignette, ToneMapping } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import { useControls, folder, Leva } from 'leva'
@@ -90,6 +89,60 @@ const UP = new THREE.Vector3(0, 1, 0)
 const REVEAL = 1.5
 const AO_DEBUG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('ao')
 const DEBUG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('debug')
+
+// Compile the static scene at the cheap tier, wait for the park's one-off bowl
+// reflection, then raise desktop quality while the loader still covers the
+// canvas. A few full-quality settle frames allocate the larger shadow/AO/MSAA
+// targets before the start card appears, so gameplay never pays that bill.
+function Warmup() {
+  const gl = useThree((s) => s.gl)
+  const scene = useThree((s) => s.scene)
+  const camera = useThree((s) => s.camera)
+  const compiled = useRef(false)
+  const phase = useRef('compile')
+  const frames = useRef(0)
+
+  useEffect(() => {
+    // Yield one browser frame so the lightweight loading screen is painted
+    // before the synchronous WebGL compile. StrictMode cancels the first RAF
+    // during its development replay, so this still runs once per real mount.
+    const raf = requestAnimationFrame(() => {
+      if (compiled.current) return
+      compiled.current = true
+
+      const invisible = []
+      scene.traverse((o) => {
+        if (o.visible === false) {
+          invisible.push(o)
+          o.visible = true
+        }
+      })
+      scene.updateMatrixWorld(true)
+      camera.updateMatrixWorld(true)
+      gl.compile(scene, camera)
+      for (const o of invisible) o.visible = false
+      phase.current = 'reflection'
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [camera, gl, scene])
+
+  useFrame(() => {
+    const g = useGame.getState()
+    if (phase.current === 'reflection') {
+      if (!g.warmupReflectionReady || ++frames.current < 2) return
+      g.setQuality(TOUCH ? 'low' : 'high')
+      frames.current = 0
+      phase.current = 'settle'
+      return
+    }
+    if (phase.current === 'settle' && ++frames.current >= 10) {
+      g.finishWarmup()
+      phase.current = 'done'
+    }
+  })
+
+  return null
+}
 
 
 // THE SINGLE MEASUREMENT THAT EXPLAINS "EVERY SURFACE READS AS FLAT PASTEL
@@ -275,6 +328,7 @@ export default function Game() {
   // Every collectible keeps its "already got" flags in a useRef with no reset
   // path, so restarting a run is a remount — one key on the group they share.
   const runId = useGame((s) => s.runId)
+  const quality = useGame((s) => s.quality)
   return (
     <>
       <Leva hidden={!DEBUG} />
@@ -308,7 +362,7 @@ export default function Game() {
         // 6" screen hides the upscale softness the cap costs a desktop display
         // (floor 0.75 on touch gives AdaptiveDpr real room to shed pixels
         // under load; steady-state still renders at the 1.5 cap)
-        dpr={TOUCH ? [0.75, 1.5] : [1, 2]}
+        dpr={TOUCH ? [0.75, 1.5] : quality === 'low' ? 1 : [1, 2]}
         gl={{
           // everything goes through the composer's own targets, so MSAA on the
           // default framebuffer is memory bandwidth spent on nothing
@@ -341,7 +395,7 @@ export default function Game() {
         <Effects />
         <PostFX />
         <PerformanceManager />
-        <Preload all />
+        <Warmup />
         <CameraController />
       </Canvas>
       <GameUI />

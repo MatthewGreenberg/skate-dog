@@ -65,9 +65,10 @@ src/game/
                       "resolves" them out into the grass.
                       The halfpipe's run-in is kept clear: the planters that
                       used to sit at (-26,8) and (-34,16) stood in the only
-                      approach lane and made every entry a slalom. Their bed
-                      lives at (-35.5,24.5) now, alongside the pipe against the
-                      west kerb. Don't put props back in that lane.
+                      approach lane and made every entry a slalom. Their
+                      replacement at (-35.5,24.5), alongside the pipe against
+                      the west kerb, was removed by request too — the pipe's
+                      corner is empty. Don't put props back there.
                       The perimeter tree/shrub ring ellipses dip INSIDE the
                       rectangular play area at its corners — HP_CLEAR keeps
                       them out of the halfpipe, and TREES also drops any ring

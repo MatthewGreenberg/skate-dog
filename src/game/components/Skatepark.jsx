@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { useThree } from '@react-three/fiber'
 import { RoundedBox } from '@react-three/drei'
 import { C, M } from '../palette.js'
+import { useGame } from '../store.js'
 import { SOLIDS, WALLS, RAILS, PERIMETER, GRASS_Y, BOWL } from '../level/levelData.js'
 import { groundHeightAt, AO_FOOTPRINTS } from '../level/colliders.js'
 import { buildBowlGeometry, buildCopingGeometry } from '../level/bowlGeometry.js'
@@ -167,6 +168,7 @@ function mats() {
 function BowlProbe() {
   const { gl, scene } = useThree()
   useEffect(() => {
+    useGame.getState().setWarmupReflectionReady(false)
     const target = new THREE.WebGLCubeRenderTarget(256, {
       type: THREE.HalfFloatType,
       generateMipmaps: true,
@@ -192,7 +194,14 @@ function BowlProbe() {
       void prev[i]
     }
     scene.remove(cam)
-    return () => target.dispose()
+    // Warmup waits for this exact signal before raising the render tier. The
+    // expensive six-face capture therefore happens at low DPR/AO/shadow cost
+    // and remains hidden behind the loading screen.
+    useGame.getState().setWarmupReflectionReady(true)
+    return () => {
+      useGame.getState().setWarmupReflectionReady(false)
+      target.dispose()
+    }
     // once, after the park has mounted — deps intentionally empty
   }, [gl, scene])
   return null

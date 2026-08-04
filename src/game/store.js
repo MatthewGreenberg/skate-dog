@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import * as THREE from 'three'
 import { SPAWN } from './level/levelData.js'
-import { TOUCH } from './input.js'
 
 /**
  * UI-facing state only. Anything that changes every frame lives on `P` below
@@ -31,13 +30,18 @@ export const useGame = create((set, get) => ({
   trickLive: false, // trick still in progress — the popup holds instead of fading
   started: false,
   paused: false,
-  // phones start at 'low' (AO 10 samples, no MSAA, halved particle emission);
-  // the shoot harness runs desktop headless so captures stay 'high'
-  quality: TOUCH ? 'low' : 'high',
+  // Every device starts low while shaders, reflections and render targets are
+  // warmed behind the loader. Desktop moves to high before the start card is
+  // revealed; phones stay low.
+  quality: 'low',
+  warmupReflectionReady: false,
+  warmedUp: false,
 
   start: () => set({ started: true }),
   setPaused: (paused) => set({ paused }),
   setQuality: (quality) => set({ quality }),
+  setWarmupReflectionReady: (warmupReflectionReady) => set({ warmupReflectionReady }),
+  finishWarmup: () => set({ warmedUp: true }),
   addScore: (n) => set({ score: Math.round(get().score + n) }),
   showTrick: (trickText, trickPoints, trickLive = false) => set({ trickText, trickPoints, trickLive }),
   settleTrick: () => set({ trickLive: false }), // trick over, let the popup fade

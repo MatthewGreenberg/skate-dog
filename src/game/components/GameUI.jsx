@@ -587,6 +587,7 @@ function RunOver() {
 
 export default function GameUI() {
   const started = useGame((s) => s.started)
+  const warmedUp = useGame((s) => s.warmedUp)
   const { progress } = useProgress()
   // Latched, not live: the manager reports active=false between items, and a
   // loader that blinks off mid-load is worse than no loader. Once 100 lands it
@@ -594,16 +595,18 @@ export default function GameUI() {
   const [loaded, setLoaded] = useState(false)
   // ponytail: hard 8s escape hatch. A manager that never reports 100 (nothing
   // left to load by the time this mounts, a failed fetch) would otherwise leave
-  // the page on the loading screen with no way into the game.
+  // the page on the loading screen with no way into the game. It bypasses only
+  // the asset manager; the renderer warm-up must still finish before reveal.
+  const [assetsTimedOut, setAssetsTimedOut] = useState(false)
   useEffect(() => {
-    const t = setTimeout(() => setLoaded(true), 8000)
+    const t = setTimeout(() => setAssetsTimedOut(true), 8000)
     return () => clearTimeout(t)
   }, [])
   useEffect(() => {
-    if (progress < 100) return
+    if ((progress < 100 && !assetsTimedOut) || !warmedUp) return
     const t = setTimeout(() => setLoaded(true), 400) // let the bar finish filling
     return () => clearTimeout(t)
-  }, [progress])
+  }, [progress, assetsTimedOut, warmedUp])
   // photo mode shows the in-play HUD with a representative score, never the
   // start card — the capture has to match a mid-session frame
   useEffect(() => {

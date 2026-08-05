@@ -30,6 +30,11 @@ const inHpClear = (x, z) => x > HP_CLEAR.minX && x < HP_CLEAR.maxX && z > HP_CLE
 // Kidney footprint as a polar radius function around (cx, cz).
 // Kept gently concave so inward offsetting for the transition never folds.
 export const BOWL = {
+  // Editor toggle. The bowl is the one park feature that isn't a table row —
+  // it's an analytic field three separate systems read — so "blank canvas" in
+  // ?edit needs a flag rather than a delete. Every consumer (colliders'
+  // sampleSurface, parkGeometry's plaza cutout, Skatepark's <Bowl/>) checks it.
+  on: true,
   cx: -15,
   cz: -4,
   r0: 5.85,
@@ -173,8 +178,9 @@ export const WALLS = [
   wall({ x: 2.5, z: 21.6, w: 3, d: 1.2, h: PAD2 + 0.5 }),
   wall({ x: 2, z: 30.6, w: 20, d: 1.2, h: PAD2 + 0.6, mural: 'rainbow' }),
 
-  // curved retaining wall hugging the bowl on the west — ref image 1
-  ...arcWall(BOWL.cx, BOWL.cz, 9.4, 2.45, 4.55, 9, 1.15, [2, 6]),
+  // curved retaining wall hugging the bowl on the west — ref image 1.
+  // Pushed out by bowlWall() below, which is also what re-runs it when the
+  // editor moves or grows the bowl.
 
   // north plaza divider with a rainbow mural
   wall({ x: -4, z: -20.6, w: 12, d: 1.2, h: 1.15, mural: 'rainbow' }),
@@ -266,7 +272,10 @@ for (const [id, side, color, off] of [
   ['stairB', -1, 'railTeal', 2.0],
   ['stairC', -1, 'railPink', 1.7],
 ]) {
-  RAILS.push(handrail(SOLIDS.find((s) => s.id === id), side, color, off))
+  // `derived` marks a row the level editor must not offer for editing: it is
+  // recomputed from another row (here, the stair) and an edit would be silently
+  // thrown away on the next reload. Same flag on the arc wall and bowl benches.
+  RAILS.push({ ...handrail(SOLIDS.find((s) => s.id === id), side, color, off), derived: true })
 }
 
 // ---------------------------------------------------------------- props
@@ -282,17 +291,9 @@ export const LAMPS = [
   { x: 0, z: 32, banner: 'flower' },
 ]
 
-// benches tucked against the curved wall, facing the bowl — ref image 1
+// benches tucked against the curved wall, facing the bowl — ref image 1.
+// The four bowl-side ones are appended by rebuildBowlDerived() below.
 export const BENCHES = [
-  // A bench's local +Z is the seat front (back slats sit at local -0.3), so the
-  // rot that looks INWARD from a point at bearing t is -t - PI/2. The +PI/2 form
-  // is the outward normal and put all four backs to the bowl, facing the wall
-  // 1.2m behind them.
-  ...[2.7, 3.35, 4.0, 4.4].map((t) => ({
-    x: BOWL.cx + Math.cos(t) * 8.2,
-    z: BOWL.cz + Math.sin(t) * 8.2,
-    rot: -t - Math.PI / 2,
-  })),
   { x: -4, z: -19.3, rot: 0 },
   { x: 2, z: -19.3, rot: 0 },
   // on pad1's top (z 9..21), not the plaza floor — without `base` it sat 1.2m
@@ -302,6 +303,50 @@ export const BENCHES = [
   { x: 18.6, z: -14.4, base: DECK, rot: 0 },
   { x: 30.5, z: -14.6, base: DECK, rot: 0 },
 ]
+
+// ------------------------------------------------------------ bowl furniture
+// The retaining wall and the four bowl benches are POSITIONED BY the bowl, so
+// the editor moving or growing it has to regenerate them — otherwise you drag
+// the pool across the plaza and its wall stays behind, hugging a hole that
+// isn't there. Both radii are ratios of BOWL.r0 (measured off the shipped
+// 5.85: wall 9.4, benches 8.2) rather than the constants they used to be, so
+// "bigger pool" pushes its furniture out with it.
+//
+// `bowl: true` is the marker rebuildBowlDerived() splices on; `derived: true`
+// is what keeps them out of the editor's own lists (an edit to one vanishes on
+// the next reload — or, here, on the next bowl nudge).
+const WALL_R = 9.4 / 5.85
+const BENCH_R = 8.2 / 5.85
+
+const bowlWall = () =>
+  arcWall(BOWL.cx, BOWL.cz, BOWL.r0 * WALL_R, 2.45, 4.55, 9, 1.15, [2, 6])
+    .map((w) => ({ ...w, derived: true, bowl: true }))
+
+// A bench's local +Z is the seat front (back slats sit at local -0.3), so the
+// rot that looks INWARD from a point at bearing t is -t - PI/2. The +PI/2 form
+// is the outward normal and put all four backs to the bowl, facing the wall
+// 1.2m behind them.
+const bowlBenches = () =>
+  [2.7, 3.35, 4.0, 4.4].map((t) => ({
+    x: BOWL.cx + Math.cos(t) * BOWL.r0 * BENCH_R,
+    z: BOWL.cz + Math.sin(t) * BOWL.r0 * BENCH_R,
+    rot: -t - Math.PI / 2,
+    derived: true,
+    bowl: true,
+  }))
+
+/** Re-derive everything the bowl positions. Emits nothing while BOWL.on is
+ *  false: a retaining wall curved around a filled-in plaza is set dressing for
+ *  a feature that no longer exists. */
+export function rebuildBowlDerived() {
+  for (const arr of [WALLS, BENCHES]) {
+    for (let i = arr.length - 1; i >= 0; i--) if (arr[i].bowl) arr.splice(i, 1)
+  }
+  if (!BOWL.on) return
+  WALLS.push(...bowlWall())
+  BENCHES.push(...bowlBenches())
+}
+rebuildBowlDerived()
 
 // Perimeter tree ring — instanced, purely decorative framing.
 export const TREES = (() => {

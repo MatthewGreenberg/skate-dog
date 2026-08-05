@@ -19,7 +19,6 @@ import { complete } from '../goals.js'
 
 const H = 0.82 // body height — under the dog's body centre, so you hit it rolling
 const RAD = 0.36
-const HIT2 = (RAD + 0.85) * (RAD + 0.85) // body radius + the dog's own girth
 const BURST = 1.15 // seconds of wreck animation (was 0.55 — a shrink, not a launch)
 const G = 9.5
 
@@ -126,15 +125,17 @@ export default function Cans() {
       if (!g) continue
       const s = st.current[i]
       const c = CANS[i]
+      const size = Math.max(0.25, c.scale ?? 1)
       const lid = lids.current[i]
       if (!s.hit) {
         // Horizontal test only, gated on the feet being near the can's band —
         // a full sphere would let a big air over the top count as a smash.
         const dy = P.pos.y - ys[i]
-        if (dy > -0.4 && dy < H + 0.5) {
+        if (dy > -0.4 && dy < H * size + 0.5) {
           const dx = P.pos.x - c.x
           const dz = P.pos.z - c.z
-          if (dx * dx + dz * dz < HIT2) {
+          const hit2 = (RAD * size + 0.85) * (RAD * size + 0.85)
+          if (dx * dx + dz * dz < hit2) {
             s.hit = true
             s.t = 0
             // Launch along TRAVEL, not along the hit normal: the dog is a
@@ -164,15 +165,15 @@ export default function Cans() {
         const k = s.t / BURST
         // squash on the frame of impact, spring back, then just fly and tumble
         const sq = Math.max(0, 1 - s.t / 0.18)
-        g.scale.set(1 + 0.55 * sq, 1 - 0.45 * sq, 1 + 0.55 * sq)
+        g.scale.set(size * (1 + 0.55 * sq), size * (1 - 0.45 * sq), size * (1 + 0.55 * sq))
         g.position.x += s.vx * dt
         g.position.z += s.vz * dt
         // The pivot is the can's CENTRE (see the -H/2 inner group), so the
         // floor for it is the tumbled body's half-DIAGONAL, not H/2 — clamped
         // at H/2 the drum's corner swept a third of every roll through the
         // paving. Eased in over the pop so it doesn't jump on the hit frame.
-        const floor = H / 2 + (HALF - H / 2) * Math.min(1, s.t / 0.12)
-        g.position.y = ys[i] + Math.max(floor, H / 2 + 2.4 * s.t - G * 0.5 * s.t * s.t)
+        const floor = size * (H / 2 + (HALF - H / 2) * Math.min(1, s.t / 0.12))
+        g.position.y = ys[i] + Math.max(floor, size * H / 2 + 2.4 * s.t - G * 0.5 * s.t * s.t)
         // tumble about the axis across travel — a can knocked forward rolls
         // end over end, it does not spin about its own y
         g.rotateOnWorldAxis(_ax.set(s.sx, 0, s.sz), 7 * dt)
@@ -197,7 +198,13 @@ export default function Cans() {
     // Outer group sits at the can's CENTRE and is what tumbles; the inner one
     // pushes the parts back down so a resting can still stands on the ground.
     // Rotating the base group end-over-end swung the drum under the paving.
-    <group key={c.id} ref={(el) => (refs.current[i] = el)} position={[c.x, ys[i] + H / 2, c.z]} rotation-y={spin[i]}>
+    <group
+      key={c.id}
+      ref={(el) => (refs.current[i] = el)}
+      position={[c.x, ys[i] + H * Math.max(0.25, c.scale ?? 1) / 2, c.z]}
+      rotation-y={spin[i]}
+      scale={Math.max(0.25, c.scale ?? 1)}
+    >
       {/* LIFT: the drum's bottom cap and the foot ring both sat exactly ON the
           paving plane, and two coplanar surfaces z-fight — it read as crawling
           aliasing round the base. 8mm is under the contact shadow, so the can

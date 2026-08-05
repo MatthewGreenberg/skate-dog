@@ -685,24 +685,30 @@ src/game/
                       pixel maths is a separate pure module so it can be checked
                       in node.
                       Dog.jsx = dog_compressed.glb, fitted and posed the same way
-                      — the fit is still measured, dogFit.js's SIZE/LEG only
+                      — the fit is still measured, dogFit.js's character store/LEG only
                       skew it (length x1.16, height x0.92, limbs x0.78 about
-                      their hips) and Player.jsx's group scale carries the
-                      overall size (1.58). Shortening the legs raises the paws
+                      their hips). dog and boy default to the old
+                      shared 1.58 scale but are independently editable in the
+                      level editor. Shortening the legs raises the paws
                       off the bind floor, so LEG_DROP (bind hips 0.163/0.184,
                       paws 0.008) comes out of BOTH the model's lift and
                       backY() or the dog floats and the rider stands on air.
                       dogFit.js = those numbers, split out because Player and
                       Rider need them and a component file may not export
-                      shared mutable state (react-refresh). SIZE.long/.tall are
-                      LIVE — Player.jsx's "Dog size" leva folder writes them,
-                      and the fit group's scale and the drop that keeps the paws
-                      on y=0 are applied per frame rather than baked into JSX
-                      props. The rider follows because his feet ride backY(),
-                      which is a function of SIZE.tall. `size` in that folder is
-                      the shared group's scale, so it carries the rider too — a
-                      dog that grows out from under its rider is not a size
-                      control. LEG is deliberately NOT a slider: the limb scales
+                      shared state (react-refresh). useCharacterSize is the one
+                      reactive source of truth: both the editor panel and Player
+                      subscribe directly, while undo/save use getState(). The
+                      optional Dog proportions leva folder keeps long/tall.
+                      The dog's fit scale and paw drop are applied per frame.
+                      The rider scales about his planted feet, which ride
+                      backY(); backY() follows dog height and dog scale. Dog and
+                      boy sizes are fully independent; cohesion comes from that
+                      planted-foot mount and size-aware trick offsets, never a
+forced ratio or silently resizing the mate. Character size has its own
+                      store update must NOT call bumpLevel(), which invalidates
+                      plaza AO, rebuilds colliders/rails and remounts the whole
+park for a change only Dog/Rider consume.
+                      LEG is deliberately NOT a slider: the limb scales
                       are set once on the bones. The skull scale (HEAD)
                       carries the snout and both ears with it; setBone only
                       writes quaternions, so a bone scale set once survives.
@@ -1121,6 +1127,421 @@ puts occluded surfaces near black, which produces a bimodal image — flat hot
 field, cliff into black — and reads to a viewer as *"there is no ambient
 occlusion"* even when the AO pass is working perfectly.
 
+## The level editor (`?edit` or `/edit`)
+
+`?edit` (or the `/edit` route — same module-load const, and the start card's
+LEVEL BUILDER button navigates there with a full page load on purpose, since
+`loadLevel()` and the music duck only run at import; `vercel.json` rewrites
+`/edit` to `index.html` in production) makes the editor AVAILABLE; `useEditor`'s `editing` flag says which half
+you are in, and it is live state, not the URL const. While editing, the chase
+rig is swapped for an orbit camera, the sim is paused entirely (GameLoop returns
+before `sampleInput` — a live sim would steer the dog off the same W/E the gizmo
+uses) and `Editor.jsx` (in-Canvas) + `EditorPanel.jsx` (DOM, left edge) mount in
+place of `CameraController` + `GameUI`; `Intro` doesn't render.
+`levelEdits.js` is the contract both sides share — its own module for the same
+reason `foliageKnobs.js` and `dogFit.js` are. The panel is PLAYFUL BUT NOT
+CHILDISH — cream card, colour-coded tool tiles, one loud PLAY — and its copy is
+plain (Undo/Duplicate/Delete/Play, not "Oops"/"Twin it"). It is three questions
+in the order you ask them: WHAT (the tool palette), WHERE (one hint line, then
+you click the ground), IS IT RIGHT (a card of −/+, ↺/↻/⊹, ▲/▼ steppers).
+A stepper is one click and unambiguous, where `w: 4.25` is two decisions (which
+field, what number) before you learn anything. Emoji rather than typographic
+glyphs for the same reason: `◣` is a shape you have to be TOLD means ramp.
+Everything that is a number rather than a decision — raw fields, the outliner,
+the JSON export, the key legend — is folded into native `<details>` drawers,
+because a panel that opens on twenty labelled inputs teaches you this is a
+spreadsheet with a park attached. The raw fields are still under "Fine tune".
+The hint line always says the next ACTION, never the current state — a static
+"Pick a tool" is a line you stop reading after a minute. Only the middle strip
+scrolls, so PLAY never leaves the screen. Armed tools read as LIFTED and
+outlined, not recoloured: the tint is how you recognise the tool, so painting
+the armed one purple makes it the one you can no longer identify. Two CSS traps:
+`.ed-panel button` sets a `font:` SHORTHAND, so a bare `.ed-play { font-family }`
+loses to it on specificity and the display face silently reverts (it is
+`.ed-panel .ed-play`); and `--e` is the panel's own unit, deliberately not the
+HUD's `--u`, which scales with the viewport because it sits over the game.
+
+**A TOOL IS NOT A TABLE.** `TOOLS` in `levelEdits.js` is the one palette both
+halves read — the panel takes label/glyph/tint off it and `Editor.jsx` takes the
+1..9 bindings and the cursor ghost's footprint (which used to be hand-copied
+from DEFAULTS and went stale silently). A tool carries a `patch`, and that is
+the whole point: SOLIDS is FOUR tools behind one `kind` field, and the old
+"Ramps" button dropped a flat 0.4 ledge — placing a ramp was simply not possible
+from the palette. So `DEFAULTS.SOLIDS` no longer carries `top`/`style` (heal()'s
+KIND table fills whatever the row's kind requires, or a ramp arrives carrying a
+box's fields too), `addRow` takes a tool id OR a bare table name, and it renames
+the row after the TOOL — `DEFAULTS.SOLIDS` spells `box7`, and a quarterpipe
+called box7 is a row you cannot find in the outliner. `levelEdits.check.js`
+asserts each SOLIDS tool builds the collider SHAPE it claims.
+
+**A tool can also be a GROUP, and a group is ONE object.** The halfpipe tool
+carries `group`: five row specs (the shipped hpDeck/hpN/hpS/hpDeckN/hpDeckS
+recipe, hardcoded like the swatch hexes) offset along local +Z (`dz`) and yawed
+relative to the placement (`drot`). `addRow` places them all inside ONE
+begin/commit and stamps every row with a shared `grp` id — and that stamp is
+what makes the pipe one object afterwards: `moveGroup`/`rotateGroup` in
+levelEdits.js apply the same translation to every member and swing the mates
+rigidly about the row being handled (rotate uses the same local-+Z yaw matrix
+as everything else). They live in levelEdits, not Editor.jsx, so the gizmo's
+`writeBack`, the panel's fine-tune x/z/rot writes (`setField` routes them —
+numbers only, since the raw inputs park draft strings and a NaN delta would
+poison all five rows), and the node check share one implementation. Translate
+write-back is a DELTA, not an absolute — the only form a group mate can
+consume. `duplicateRow` copies the whole group under a fresh stamp (a lone copy
+still carrying the old `grp` would drag the original around) and `deleteRow`
+takes the whole group with it. `snapLines` skips a dragged row's group mates as
+snap sources — they move with the drag. The tool's `patch` is only the
+footprint `placementInfo` tests; the ghost previews every group row
+(`ghostShapes` maps `group` to real quarter wedges plus boxes, hence the `ry`
+slot on ghost children). It sits AFTER ledge in `TOOLS` on purpose: the panel
+resolves a selected row to the first tool whose `patch.kind` matches, and ahead
+of ledge every box row's card would read "Halfpipe". `levelEdits.check.js`
+asserts the five rows, the facing quarters' colliders, group move/rotate
+rigidity reaching the colliders, whole-group duplicate/delete, and the
+single-undo placement.
+
+**Materials are swatches, not dropdowns.** `LOOKS` in `levelEdits.js` maps each
+table's material-ish field (`style`/`mural`/`color`/`plant`/`banner`) to swatch
+options the card renders as one-tap colour chips; the same fields stay in the
+Fine-tune ENUMS for completeness. It is a FUNCTION of the row because SOLIDS'
+options hang off `kind` (stairs have no style). Swatch hexes are hardcoded
+mirrors of palette.js `C.*`, same as TOOLS' tints — the module stays loadable by
+the node checks. New looks that ride it: `railMint` (a fourth rail enamel in
+Skatepark's `mats()` — the colour already existed for benches) and two murals
+(`paws`, `sunshine`) as branches in Props.jsx's `drawMural`; the sunshine face
+is MINT, not cream, because cream on the yellow disc vanishes at the mural's
+0.78 alpha.
+
+**The whole scene is editable too: ground look and time of day.**
+`useSceneSettings` in `levelEdits.js` is the reactive source for
+`{ time, ground, pattern }`, with preset tables `TIMES`/`GROUNDS` (hardcoded
+hexes, node-check loadable) and `setScene(patch)` (one undo). It rides the
+undo snapshot, the save blob and `SHIPPED`, and the panel renders it as a
+"🎨 Scenery" card of swatches under the Pool button. The defaults ARE the
+shipped art and that is load-bearing: `sunset` carries NO overrides — every
+`??` and `×1` in Lighting.jsx falls through to the measured constants — and
+`classic` tints white, so a plain visit (loadLevel only runs under `?edit`) and
+the shoot harness render byte-identical. Ground: `groundOf().tint` multiplies
+BOTH plaza materials' `color` (m.plaza too, or deck insets keep the old floor)
+and each non-classic preset carries coordinated stone/masonry/bowl/halfpipe/
+wood/grass multipliers plus a light atmospheric tint, so Colour reads as a park
+palette rather than an isolated floor filter. This lives in a Plaza
+`useLayoutEffect` — mats() is module-cached but Skatepark remounts
+for geometry commits; Plaza also subscribes directly to ground/pattern so a
+scene click never rebuilds the park. Lighting subscribes directly to time for
+the same reason. The floor's PATTERN is a third scene axis (`PATTERNS`, a "Pattern" swatch
+row whose chips are CSS GRADIENTS — a pattern chip has to look like its
+pattern, not a colour): the same Plaza effect swaps `map`/`normalMap` on both
+plaza materials via textures.js `plazaMapFor`/`plazaNormalFor` and applies each
+pattern's own bump strength, roughness and environment response. `slabs`
+returns the SAME cached shipped textures (identity, like sunset/classic);
+tiles/brick/checker/concrete/wood are drawn on demand off `PLAZA_PATTERNS` —
+a bond walk whose odd rows start at i = −1 and colour by WRAPPED index, so a
+running bond tiles (ny must stay EVEN or the vertical wrap breaks row parity).
+Time presets likewise replace the full rig as a family — key, hemisphere,
+fill, environment cards, sky and fog — while sunset carries no overrides and
+therefore remains the shipped identity look.
+`brickHue` is a fourth scene value with its own Scenery stepper. It rotates the
+sampled masonry colour in Skatepark's material shader through a live uniform;
+a material multiplier cannot turn purple into teal or gold, and regenerating
+the masonry texture on every click would be the wrong performance model. Zero
+degrees is identity, and the value rides undo/save/reset with the other scene
+settings.
+`concrete` is `flat` (no cells; extra cracks carry the read, near-flat normal)
+and `wood` colours off RAMP.wood with along-board grain streaks — a 2.67×0.31m
+half-bond boardwalk, not parquet. No
+`needsUpdate` on the swap: both slots are always occupied, so no shader define
+moves. All patterns share `plazaRough()`; pattern × tint compose since tint is
+a `color` multiply. Time: Lighting
+takes `useLevelVersion()` and scales key colour/intensity (`keyK`), the three
+ambient terms (`amb`), sky, skyHigh and fog from the preset; the `Environment`
+is keyed on the preset id because `frames={1}` bakes once per mount — without
+the key a time change keeps the old sky dome. The sun DIRECTION deliberately
+does not move: `SUN`/`LIGHT_BASIS` are module constants the shadow fit and the
+shader cookie are built on, and colour+intensity already sells the hour.
+
+**A quarter's rise can never outgrow its run.** Past h = d the arc circle
+R = (d²+h²)/2h puts the DRAWN surface's top at d²/h — below y1 — while the
+coping tube and the collider's lip stay at y1, so a tall quarter visibly came
+apart. `heal()` grows `d` to match `y1 − y0` on every quarter-curve write
+(steppers, fine-tune, the height-match below), so any height is reachable and
+still draws whole; d = h is a perfect quarter circle, vertical at the lip.
+
+**The ghost knows the level, gently — with ONE refusal.** `placementInfo(toolId,
+x, z, rot)` in `levelEdits.js` is a pure query returning
+`{ warn, matchTop, block }`. `block` is true only for a grounded row footed in
+the pool (`isInsideBowl` on the footprint's centre + four corners, only while
+`BOWL.on`) — the pool is a hole, so the row would stand on air the plaza no
+longer draws; Editor.jsx's groundDown swallows that click. Floaters (bones,
+letters) sail over it: extents() has no case for them, so they never reach the
+test — an air line over the bowl is a line, not a mistake. Everything else is
+advisory:
+a bury (overlap that isn't the designed ramp-into-deck hole; `rampTopAt`'s rule,
+so a flat no taller than the ramp's top is LEGAL and stays quiet, as does an
+exactly-flush neighbour under the 0.05 margin), a blocked run-up (the bank1
+mistake — a probe 2.2m off the ramp's LOW edge hits something taller than
+STEP_UP), and `matchTop`, the vertical twin of the flush-face snap: the flat the
+HIGH edge lands against offers its top, and `addRow` sets `y1` to it. Editor.jsx
+tints the ghost amber on `warn` and writes the message into the store's `hint`
+slot ONLY when the string changes (groundMove fires at pointer rate); the panel
+shows it in the coach line (`.ed-coach.warn`). Local +Z is a ramp's HIGH edge —
+Skatepark draws the coping at +d/2 — and `rot` yaws it to world (sin, cos).
+`levelEdits.check.js` covers all four behaviours.
+
+**The ghost is a silhouette, and placement makes a sound.** `ghostShapes()` in
+Editor.jsx gives ramps/quarters a real wedge (`buildRampGeometry`), stairs their
+steps, rails/lamps/cans cylinders; boxes stay boxes where they are honest. One
+shared ghost material (colour mutated at pointer rate — tool tint or amber), and
+the geometry set is DISPOSED on tool switch or each armed tool leaks its
+silhouette to the GPU. `sfxPlace`/`sfxDelete` in AudioManager are the editor's
+two one-shots — they call `unlockAudio()` themselves (a placement IS a click,
+and the editor never runs the game's start gesture) and are guarded for node
+because the level checks import levelEdits, which imports AudioManager. Taller
+object, deeper pop.
+
+**The pool is editable, and it drags its own furniture.** `BOWL` is not a table
+row (an analytic field colliders' `sampleSurface`, `parkGeometry`'s plaza cutout
+and Skatepark's `<Bowl/>` each read), so it gets `setBowl(patch)` and a store
+selection slot of its own (`bowlSel` — unlike the spawn marker's local
+`spawnSel`, the PANEL has to show a card for it). Editor.jsx puts a ring handle
+on the rim so you drag it like anything else; the card carries `r0` and
+`depthMid`, which a gizmo cannot express. It also gets a **"🏊 Pool" button in
+the panel**, above the hint line and outside the palette: the palette places
+things and the pool is the one park feature you can edit but never place, so
+without that button the only way to reach it was knowing its rim ring was
+clickable (and the ring hides while a tool is armed). The load-bearing part is
+`rebuildBowlDerived()` in levelData: the curved retaining wall and the four
+benches facing the bowl are POSITIONED BY it, so their radii are now ratios of
+`BOWL.r0` (9.4/5.85 and 8.2/5.85 — the shipped numbers, so nothing moved) and
+they are spliced and regenerated on every bowl edit. Without it you drag the
+pool across the plaza and its wall stays behind hugging a hole that isn't there.
+It emits NOTHING while `BOWL.on` is false — a wall curved around a filled-in
+plaza is set dressing for a feature that no longer exists. The undo snapshot and
+the save blob carry the WHOLE bowl now, not just `on`: a snapshot with only the
+flag undoes a delete but not a drag. `restore()` deliberately does not re-derive
+— the snapshot's tables already carry the wall and benches as they stood.
+
+**Size steppers are per-AXIS, not one uniform scale.** "Make the ramp bigger" is
+three different wishes — wider, longer, steeper — and a uniform scale grants
+none of them: it grows run and rise together and the angle never changes. Each
+axis reads whichever field that row happens to carry (a box's height is `top`, a
+wall's is `h`, a ramp's is `y1`), and `y1` is floored against `y0` because it is
+measured ABOVE it, not above the plaza.
+
+**A rail has no fields to step, so it gets its own three.** RAILS carries `pts`
+and nothing else a card can drive — no `w`/`d`/`h` for DIMS, no `rot`, no `y` —
+so a selected rail used to offer material swatches and stop there, and the only
+way to lengthen one was the raw `pts` array the fine-tune drawer hides.
+`railLength`/`extendRail`/`turnRail`/`liftRail` (levelEdits.js, so
+`levelEdits.check.js` can measure them) mutate the array in place: extend
+pushes the LAST point along the FINAL segment, which is what "longer" means on
+a curved rail too, and floors that segment at 0.5m because a zero-length one
+has no direction left to grow along again (`rebuildPaths` drops it anyway).
+Lift floors at 0.2. There is deliberately no add-a-bend control — a new point
+you cannot then drag changes nothing on screen; that wants a per-point handle
+in Editor.jsx. The check asserts the extension is GRINDABLE, not just longer:
+these steppers are the editor's usual claim that a commit reaches the paths.
+
+**R turns what you are HOLDING.** `addRot` in the store is the armed ghost's
+yaw, applied to the row on placement and sticky across placements (laying a row
+of angled ledges should not mean re-rotating each one). It only lands on tables
+whose renderer reads `rot`; RAILS has no `rot` field at all, so the yaw rotates
+its `pts` about the placement point instead. With nothing armed, R falls through
+to the gizmo's rotate mode, which is what it means everywhere else.
+
+**Snapping is grid PLUS flush faces, and the object snap wins.** The grid alone
+never sufficed: a 4m ledge butted against a 3m planter lands its face on a
+coordinate no grid cell expresses, so "snapped" objects still left millimetre
+gaps you found by riding into them. `snapLines`/`snapAxis` (Editor.jsx) offer
+every other row's centre line and its faces ±the moving object's own half-width,
+and an object snap in range BEATS the grid rather than competing on distance —
+the grid is always within half a cell, so a distance contest means the flush
+snap you actually want almost never wins. Three things it has to get right:
+rotated rows are skipped as SOURCES (their faces aren't axis-aligned, so
+"flush" is a lie and the AABB would snap you to a corner of empty air; 90° rows
+are fine with w/d swapped); only the axes the handle ACTUALLY moved are snapped,
+or a single-axis drag jogs the object sideways onto whatever line it was sitting
+near; and `translationSnap` on TransformControls is now unset, because TC rounds
+relative to the drag START and the two roundings disagree by whatever sub-cell
+offset the object already had. Placement and the cursor ghost run the same
+`placeAt`, so the ghost is never a preview of a different position than the
+click produces. The snap lines are built ONCE per drag — the sources don't move
+while you drag one of them.
+
+**The saved level is the editor's workbench, not the game.** `loadLevel()` runs
+at import only under `?edit` — a plain visit is always the SHIPPED park, so
+somebody else's session can't hand you a level you never built. Going to PLAY
+from inside the editor still carries the edits: `setEditing(false)` never
+reloads.
+
+**The plaza's baked AO is rebuilt with the level.** `parkAOMap` is the one map
+in textures.js NOT cached forever: it bakes a contact shadow under every prop,
+so a stale one leaves shadows on the plaza under rows you moved or deleted (and
+`mats()` is module-cached, so the material outlives Skatepark's remount).
+`bumpLevel()` calls `invalidateParkAO()` — which disposes the old texture, or a
+commit leaks one per drag — and `rebuildColliders()` refills `AO_FOOTPRINTS` in
+place; Skatepark re-reads both in a `useLayoutEffect` with `needsUpdate`, since
+aoMap presence is a shader define and not just a texture swap.
+
+**The viewport clears while editing, and HELD SPACE is the hand.** Lighting.jsx
+drops the `<fog>` when `useEditing()` is true — the far end of the park is
+exactly where you place things from, and FOG_NEAR 22 hazes it. Space held swaps
+OrbitControls' LEFT button to `THREE.MOUSE.PAN` (cursor `grab`) rather than
+adding a second camera path, so damping and TransformControls' `makeDefault`
+handover are untouched; `groundDown` returns early while it is held, or the
+end of a pan drops a row. keyup is its own listener (the editor's `onKey` is
+keydown-only) and `blur` clears it — alt-tabbing mid-hold never delivers the
+keyup and the pan sticks on.
+
+**The soundtrack ducks to 30% while editing** (`setMusicDuck` in AudioManager,
+called from `setEditing` and once at import when `?edit` is in the URL — that
+first entry never goes through `setEditing`). Duck, not pause: silence reads as
+broken audio. It is a separate factor from `muted` for the obvious reason —
+one variable for both means unmuting while editing comes back at full level.
+A palette entry is one control, not two: it arms placement AND scopes the
+outliner. `arm()` itself deliberately does not move `table` (Editor.jsx's 1..9
+shares it and a hotkey should not yank the list you are reading), so the panel's
+`pick` sets the scope alongside it — clicking the armed tool again disarms but
+leaves you browsing that table.
+
+**Build -> play -> build is one function, `setEditing(on)`.** Going to play is a
+whole fresh run on the edited level — `bumpLevel()`, `resetPlayer()`,
+`resetGoals()`, `restart()`, `started: true`, `P.paused = false`, and
+`P.intro = 0` because you are testing a ramp you just placed, not being
+introduced to the park. Spreading those six across the callers is how one of
+them gets forgotten and a playtest starts on the previous level. `P` enters play
+and Esc returns; the Esc listener is CAPTURE-phase with `stopPropagation`,
+because GameUI has its own window-level Esc (the challenge sheet) that must not
+also fire on the way out of a playtest.
+
+**Edits survive a refresh.** `saveLevel()` runs from `bumpLevel()` — undebounced
+on purpose, since a commit only fires on drag-end or a field blur, so it is a
+handful of small JSON writes a minute. `loadLevel()` runs once at import, inside
+a try/catch: a corrupt or stale blob falls back to the shipped park silently,
+because a throw there takes the whole game down before the canvas mounts over a
+debug feature. Restored rows carry no `__k` (`clean()` strips it) and must be
+re-stamped by `keyOf()` or every React key in the panel and the proxy layer is
+`undefined`. `SHIPPED` is a deep snapshot taken BEFORE the load is applied —
+that is what `resetLevel()` restores to, and it is JSON round-tripped on each
+restore rather than handed out by reference, or the next edit mutates it.
+
+**Named user levels are a second store, separate from the workbench.**
+`skatedog.levels` holds `{ id, name, at, thumb, data }` entries: `saveLevelAs`
+(the panel's 💾 Save, next to PLAY — native `prompt()` for the name) appends
+one, the start card's MY LEVELS strip lists them with thumbnails and a ✕
+delete, and `/?level=<id>` plays one — applied at module load via `applyBlob`
+(the extracted body of `loadLevel`), AFTER `SHIPPED` is snapped, so reset
+still restores the shipped park. Playing or building from the home screen is a
+full navigation on purpose: `EDIT`, `loadLevel` and the music duck all run at
+import. The thumbnail is `thumbCapture` (levelEdits.js), a shared slot
+Editor.jsx fills with a gl/scene/camera grab — it renders a fresh frame first
+(preserveDrawingBuffer is off, so the buffer must be repainted in the same
+task) and downscales to a 320px jpeg data-URL; `saveLevelAs` retries without
+the thumb on quota. `levelEdits.check.js` shims localStorage and asserts the
+save → list → apply → delete round-trip.
+
+`clearAll()` gives you a blank canvas. It is safe with respect to `derived` rows
+because the handrail IIFE and `arcWall()` already ran at module load and pushed
+plain rows — there is no generator left to disagree with an empty table. The
+BOWL is the one park feature that isn't a table row (an analytic field three
+systems read), so it gets `BOWL.on` instead of a delete, checked in exactly
+three places: `colliders.js`'s `sampleSurface` (or you fall into a hole the
+plaza no longer draws), `parkGeometry.js`'s plaza cutout, and Skatepark's
+`<Bowl/>`. `BowlProbe` stays mounted either way — it bakes the reflection the
+coping AND the three rail materials read, and `Warmup` blocks on the ready
+signal it sets, so skipping it strands the loading screen. `SPAWN` is editable
+via `setSpawn(x, z)`; `resetPlayer()` reads it fresh, so mutating in place is
+enough. All three ride the undo snapshot and the save blob.
+
+`Bones`/`Letters`/`Cans` are keyed on `` `${runId}:${levelV}` `` for the same
+reason `Skatepark` is keyed on `levelV`: they read their tables at mount.
+
+The model is blunt on purpose: **the editor mutates `levelData`'s exported
+arrays in place.** There is no document format to keep in sync — the level IS
+the document. Everything downstream is one of two kinds:
+
+- **A pure function of those arrays** (Skatepark/Props geometry). It gets a
+  remount: `Game.jsx` puts `key={levelV}` on `<Skatepark>`. This is not
+  optional — Skatepark bakes its world matrices in a `useLayoutEffect(…, [])`
+  and sets `matrixWorldAutoUpdate = false`, so a moved row is *silently
+  invisible* until that effect runs again. Same "a remount IS the reset" trick
+  `runId` plays for the collectibles.
+- **A module-load snapshot** (`colliders.js` builds `cols` + the broad-phase
+  grid at import; `rails.js` builds `PATHS`). Those got `rebuildColliders()` /
+  `rebuildPaths()`, which refill the **same arrays in place** — PlayerController
+  holds `COLLIDERS` and `PATHS` by reference, and reassigning would leave the
+  sim on the old geometry while the render showed the new. `bumpLevel()` calls
+  both, then bumps the version. Without this the editor is visual-only: you
+  move a ramp and ride through where it used to be. `levelEdits.check.js`
+  asserts a moved `qp1` moves its collider and a new wall grows its two lip-edge
+  grind paths.
+
+Everything is a **proxy layer**, never a gizmo on the baked scene: one pickable
+box per row in a group that is a *sibling* of Skatepark's root, so it gets
+normal matrix updates. Idle proxies are `opacity 0`, not faint — a raycast
+needs a hit, not a pixel, and ~90 overlapping boxes at 0.06 hazed the whole
+frame white. The `<Grid>` sits at **y = −0.02, under the plaza**, for the same
+reason: 4mm above the floor its lines converged at the grazing angle into a
+200m white sheet over the park.
+
+Things paid for already:
+
+- **`derived: true`** marks a row recomputed from another (handrails from their
+  stair, the arc wall and the four bowl benches from `BOWL`). `editable()`
+  filters them out — offering one hands you an edit that vanishes on reload.
+  `TREES`/`SHRUBS` aren't tables at all; they're seeded IIFEs over `PERIMETER`
+  (that's what `FoliageControls` is for).
+- **`__k`**, a stable per-row key assigned once. `WALLS`/`PLANTERS`/`BENCHES`/
+  `LAMPS` carry no `id` and Skatepark keys them by array index, which breaks the
+  first time you delete or duplicate.
+- **Inspector inputs are keyed on the row's `__k` AND the version.** Keyed on
+  the field name alone, React reuses the input instances across a selection
+  change and the new row shows the previous row's drafts — a LETTER rendered as
+  `id: pad2, x: 2, z: 26` the first time this was measured. Fields commit on
+  blur/Enter, never per keystroke: a commit rebuilds colliders and remounts the
+  park.
+- **Undo is whole-level snapshots**, not a command log — the level is a few kB
+  of plain JSON. `restore()` replaces the row objects wholesale, so both the
+  gizmo and the panel have to re-resolve the selection by `__k` afterwards.
+- **`TransformControls` needs `makeDefault` on `OrbitControls`** — drei reads
+  `useThree(s => s.controls)` and disables it mid-drag; without it they fight.
+  Nothing writes to a row during a drag (`onObjectChange` is per-frame); the
+  write-back happens once on `dragging-changed` false.
+- **Rotate is gated per table** (only rows with a `rot`), and there is no scale
+  gizmo: three's is local-space only, and `w`/`d`/`h` are numbers the panel
+  edits directly. The Y translate handle is gated the same way (`SHOW_Y` =
+  BONES/LETTERS/RAILS): everything else is placed on the ground by its own
+  `base`, so `writeBack` discards Y — and a handle you can drag that does
+  nothing reads as a broken gizmo, not as a constraint.
+- **Adding is click-to-place, and while a table is armed nothing else
+  raycasts.** `arm(table)` (1..9, or the panel palette) puts the editor in a
+  placement mode; a ghost the size of that table's footprint follows the cursor
+  (mutated directly — it fires at pointer rate, so a store write per move is a
+  re-render per move), and the ground plane's click drops a snapped row at the
+  hit point and STAYS armed, so a row of cans is one trip. Every proxy takes
+  `raycast = () => null` while armed and the gizmo is unmounted entirely —
+  ~90 invisible proxies and a set of gizmo handles otherwise sit between the
+  cursor and the ground plane, and an opacity-0 box eating a placement click
+  is indistinguishable from a bug. `select()` clears `add` by design (clicking
+  an existing row means you are inspecting now), so the placement path selects
+  the new row through `set()` instead.
+- **SPAWN is gizmo-able but is not a row.** It is a bare object in levelData,
+  not a table, so the panel's `editable(table)` would throw on it — the
+  marker's selection lives in Editor.jsx's own `spawnSel`, not in the store's
+  `row` slot, and it keeps the two in sync by SUBSCRIBING to the store rather
+  than running an effect on `row` (setState in an effect body is a cascading
+  render; the panel can select a row this component never sees as a prop).
+  Drag-end writes `SPAWN.x/z` (or `.heading` in rotate) directly and calls
+  `commit()` rather than `setSpawn()`, which opens with its own `begin()` —
+  the drag start already pushed one, and two snapshots is two undos for one
+  drag. `begin()`'s snapshot carries `spawn`, so it is undoable either way.
+- **Export is the CLIPBOARD, not codegen.** `levelData.js` is ~60% load-bearing
+  commentary and its rows carry derived expressions (`h: DECK + 0.7`,
+  `rot: Math.PI`); a round-tripper flattens both and silently unlinks a row from
+  the constant it was authored against. You paste a table and read the diff.
+
+Nothing here touches `?shot=` or the node checks.
+
 ## Seeing your changes
 
 **Do not eyeball it, and do not trust a diff.** The game has a deterministic
@@ -1161,6 +1582,9 @@ node src/game/level/rails.check.js         # rail/post clearance vs walls, props
                                            # samples the DRAWN catmull-rom curve, not the authored polyline
 node src/game/level/bones.check.js         # bone + D-O-G float band/spacing, can clearance
 node src/game/level/decals.check.js        # floor decals: on flat plaza only, in bounds, low contrast, inside the atlas gutter
+node src/game/level/levelEdits.check.js    # ?edit: a commit reaches the colliders and the grind paths, undo unwinds it;
+                                           # blank canvas is still rideable, save/load round-trips SPAWN + BOWL.on,
+                                           # resetLevel restores the shipped park, and a rot-less wall can't NaN the sim
 node src/game/goals.check.js               # each challenge pays once for +15s; predicates discriminate
 node src/game/level/ramps.check.js         # every ramp + stair enterable, climbable, qp1 pops vert, early pop transfers to deck
 node src/game/level/collision.check.js     # ~40s: broad-phase coverage, wall penetration, ramp seams, drops, dt consistency, perimeter
@@ -1375,6 +1799,21 @@ bed that rasterises solid is a bed you cannot count a plant in.
   The default is `w/2 - 0.7` now — every handrail in the park runs inside the
   treads, there is no outside — and `rails.check.js` carries the stringer's box
   and walks the DRAWN catmull-rom curve at 10cm.
+- **A row built outside levelData's `box()`/`wall()` factories arrives without
+  `rot`/`base`, and NOTHING downstream defaults them.** `rails.js` does
+  `Math.cos(w.rot)` and `colliders.js` does `base + h`; `Math.cos(undefined)` is
+  NaN, so every point of that wall's two lip-edge grind paths was NaN. That is
+  not a wonky wall. `rebuildPaths` tested `l < 1e-4` to drop a degenerate
+  segment and **NaN fails that test**, so the segment was KEPT with a NaN
+  tangent; then in `closestOn`, `d2 < best.d2` is likewise false for NaN, so
+  `best.tan` stayed null and `findGrind` dereferenced it. Rolling anywhere near
+  a newly placed wall took the whole sim down —
+  `Cannot read properties of null (reading 'x')` in `findGrind`. Three fixes,
+  all needed: the editor's `DEFAULTS` carry every field their consumers read,
+  `heal(table, row)` refills them on load and on a `kind`/`style` switch (a box
+  row switched to `ramp` has no y0/y1/curve, and `steps` has no default at all),
+  and both tests are NaN-safe now (`!(l > 1e-4)`, `if (!hit.tan) continue`) so a
+  bad row degrades to "not grindable" instead of ending the run.
 - **TiltShiftEffect carries two masks that disagree.** The blur material ramps
   its strength with a smoothstep across `[focusArea - feather, focusArea]`, but
   the composite that picks blurred-vs-sharp is `step(offset-b) - step(offset+b)`

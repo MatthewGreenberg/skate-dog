@@ -8,6 +8,7 @@ import { input, consumeJump, applyTouchStick, TOUCH } from '../input.js'
 import { sampleSurface, resolveCollision } from '../level/colliders.js'
 import { findGrind, railAt, PATHS } from '../level/rails.js'
 import { SPAWN, BOWL, bowlRadius } from '../level/levelData.js'
+import { dogLength } from '../components/dogFit.js'
 
 // ------------------------------------------------------------------ tuning
 const STEP = 1 / 120
@@ -22,6 +23,10 @@ const SPEED_K = TOUCH ? 0.7 : 1
 const MAX_SPEED = 13 * SPEED_K
 const ACCEL = 13 * SPEED_K
 const REVERSE_ACCEL = 5
+const DEFAULT_DOG_LENGTH = 1.12 * 1.16 * 1.58
+// Keep the dog's pace constant in body-lengths per second. This is live rather
+// than captured at load because the editor can resize the character in place.
+const movementScale = () => dogLength() / DEFAULT_DOG_LENGTH
 // Transition pump, as a multiplier on ACCEL per unit of surface curvature
 // (a 1.6m/2.4m quarter is 0.385, so this peaks near 1.2x ACCEL at low speed).
 const PUMP = 3.2
@@ -49,12 +54,19 @@ const ALIGN = 5
 const PIPE_HOLD = 0.9
 
 const JUMP_V = 7.6
-// Clean-landing reward: land square with the flip ridden out and you keep MORE
-// than you brought — the skate-game pump loop. Gated on real air so ollie spam
-// can't build speed from nothing, capped so overspeed drag wins eventually.
-const CLEAN_BOOST = 0.1 // base momentum bonus
-const CLEAN_BOOST_AIR = 0.04 // extra per second of air, up to +0.08
-const CLEAN_CAP = 1.25 // of MAX_SPEED
+// A short, unscored hop still preserves the original clean-landing pump loop.
+// Once a landing has trick points, the score-scaled reward below replaces it.
+const CLEAN_BOOST = 0.1
+const CLEAN_BOOST_AIR = 0.04
+const CLEAN_CAP = 1.25
+// Landing reward: every banked air trick gives an instant push, scaled by the
+// points displayed for that trick (including its combo multiplier). The curve
+// makes score increases always matter while approaching a safe maximum, and
+// the speed cap lets the normal overspeed drag pull the player back down.
+const LAND_BOOST_MIN = 1.5
+const LAND_BOOST_RANGE = 6.5
+const LAND_BOOST_HALF_SCORE = 350
+const LAND_BOOST_CAP = 1.65 // of MAX_SPEED
 const COYOTE = 0.13
 // A flatground ollie is airborne ~0.69s (2*JUMP_V/G), so 1.0 needs a properly
 // pumped ramp/bowl air — the rainbow-sparkle "big air" celebration moment,
@@ -194,9 +206,12 @@ function stepGround(dt) {
   // steering. forward is (sin h, 0, cos h), so a rising heading yaws
   // counter-clockwise about +Y — a *left* turn. Steer right (+1) subtracts.
   const sp = Math.hypot(P.vel.x, P.vel.z)
+  const sizeK = movementScale()
+  const maxSpeed = MAX_SPEED * sizeK
+  const accel = ACCEL * sizeK
   // 0 when steering into the lean you already hold, 1 at a full reversal
   const shift = Math.max(0, -input.steer * P.lean)
-  const turn = TURN_LOW + (TURN_HIGH - TURN_LOW) * Math.min(1, sp / MAX_SPEED)
+  const turn = TURN_LOW + (TURN_HIGH - TURN_LOW) * Math.min(1, sp / maxSpeed)
   P.heading -= input.steer * turn * (1 + SHIFT_TURN * shift) * dt
 
   // Transition assist. On a wall, a couple of degrees of heading error is metres
@@ -241,8 +256,8 @@ function stepGround(dt) {
   // qp1 returned MORE energy than it took to climb — a 1.6m quarter threw you
   // 3m over the coping just for holding W.
   const pushK = Math.max(0.15, n.y) // NB: `push` is the module-scope wall-normal scratch
-  if (input.throttle > 0) P.vel.addScaledVector(f, ACCEL * pushK * input.throttle * dt)
-  else if (input.reverse) P.vel.addScaledVector(f, -REVERSE_ACCEL * pushK * dt)
+  if (input.throttle > 0) P.vel.addScaledVector(f, accel * pushK * input.throttle * dt)
+  else if (input.reverse) P.vel.addScaledVector(f, -REVERSE_ACCEL * sizeK * pushK * dt)
 
   // Pump. Throttle can't drive you on a transition (pushK -> 0.15 on a
   // near-vertical wall, by design — free thrust up a wall threw you 3m over the
@@ -255,9 +270,9 @@ function stepGround(dt) {
   // at MAX_SPEED, so it tops the session up rather than winding it up without
   // limit, and the brake still beats it.
   if (surf.curv > 0.02) {
-    const pump = PUMP * surf.curv * Math.max(0, 1 - sp / MAX_SPEED)
+    const pump = PUMP * surf.curv * Math.max(0, 1 - sp / maxSpeed)
     const dir = P.vel.dot(f) < -0.5 ? -1 : 1
-    P.vel.addScaledVector(f, ACCEL * pump * dir * dt)
+    P.vel.addScaledVector(f, accel * pump * dir * dt)
   }
 
   // gravity along the surface — this is what builds speed in the bowl
@@ -270,7 +285,7 @@ function stepGround(dt) {
   let tSpeed = tmp.length()
 
   if (input.brake && tSpeed > 0.05) {
-    const drop = Math.min(tSpeed, BRAKE * dt)
+    const drop = Math.min(tSpeed, BRAKE * sizeK * dt)
     tmp.multiplyScalar((tSpeed - drop) / tSpeed)
     tSpeed -= drop
   }
@@ -288,7 +303,7 @@ function stepGround(dt) {
 
   // drag + soft speed cap (gravity may still push past it in the bowl)
   let drag = ROLL_DRAG
-  if (tSpeed > MAX_SPEED) drag += OVERSPEED_DRAG * (tSpeed - MAX_SPEED)
+  if (tSpeed > maxSpeed) drag += OVERSPEED_DRAG * (tSpeed - maxSpeed) / sizeK
   tmp.multiplyScalar(1 / (1 + drag * dt))
 
   P.vel.copy(tmp)
@@ -605,7 +620,6 @@ function stepAir(dt) {
 
   P.vel.y -= G * dt
 
-  const prevY = P.pos.y
   P.pos.addScaledVector(P.vel, dt)
   if (resolveCollision(P.pos, P.pos.y, RADIUS, push)) slideAlongWall(dt)
 
@@ -682,19 +696,40 @@ function land(s) {
     }
   }
 
-  // clean landing: square to your line (within ~20deg of a whole spin) and the
-  // flip finished. P.vel is tangent after reproject, so scaling the whole
-  // vector keeps it on the surface.
-  if (trick.air > 0.3 && roll < 0.5 && Math.abs(spinResidual) < 0.35) {
-    const sp = P.vel.length()
-    const cap = MAX_SPEED * CLEAN_CAP
-    if (sp > 0.5 && sp < cap) {
-      const k = Math.min(cap / sp, 1 + CLEAN_BOOST + Math.min(0.08, trick.air * CLEAN_BOOST_AIR))
-      P.vel.multiplyScalar(k)
-    }
+  const cleanLanding = trick.air > 0.3 && roll < 0.5 && Math.abs(spinResidual) < 0.35
+  const landingAir = trick.air
+  const trickPoints = scoreAir()
+  if (trickPoints > 0) boostLanding(trickPoints)
+  else if (cleanLanding) boostCleanLanding(landingAir)
+}
+
+function boostCleanLanding(airTime) {
+  const speed = P.vel.length()
+  const cap = MAX_SPEED * movementScale() * CLEAN_CAP
+  if (speed <= 0.5 || speed >= cap) return
+  const k = Math.min(cap / speed, 1 + CLEAN_BOOST + Math.min(0.08, airTime * CLEAN_BOOST_AIR))
+  P.vel.multiplyScalar(k)
+}
+
+// Apply the reward along the landed surface so it cannot pop the player back
+// into the air. A near-stationary trick starts moving in the facing direction;
+// otherwise the impulse preserves the actual direction of travel (including
+// fakie landings and transition roll-outs).
+function boostLanding(points) {
+  const sizeK = movementScale()
+  const cap = MAX_SPEED * sizeK * LAND_BOOST_CAP
+  const bonus =
+    SPEED_K * sizeK * (LAND_BOOST_MIN + (LAND_BOOST_RANGE * points) / (points + LAND_BOOST_HALF_SCORE))
+  const speed = P.vel.length()
+
+  if (speed > 0.05) {
+    P.vel.multiplyScalar(Math.min(cap, speed + bonus) / speed)
+    return
   }
 
-  scoreAir()
+  f.set(Math.sin(P.heading), 0, Math.cos(P.heading))
+  f.addScaledVector(n, -f.dot(n))
+  if (f.lengthSq() > 1e-6) P.vel.copy(f.normalize()).multiplyScalar(Math.min(cap, bonus))
 }
 
 const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a))
@@ -734,11 +769,12 @@ function stepGrind(dt) {
   // Frames after entry agree with the old hypot, since P.vel is rewritten to
   // tangent * speed below.
   let speed = Math.abs(P.vel.dot(railTan))
+  const sizeK = movementScale()
   // gravity along the rail + drag
   speed += -G * railTan.y * P.grindDir * dt
-  if (input.brake) speed -= BRAKE * 0.5 * dt
+  if (input.brake) speed -= BRAKE * sizeK * 0.5 * dt
   speed /= 1 + GRIND_DRAG * dt
-  speed = Math.min(speed, MAX_SPEED * 1.35)
+  speed = Math.min(speed, MAX_SPEED * sizeK * 1.35)
 
   P.grindS += speed * P.grindDir * dt
   trick.grindTime += dt
@@ -913,8 +949,9 @@ function scoreAir() {
   // pts can only be 0 here if the live tape never showed anything either —
   // except a Pool Gap flown and then landed back IN the bowl, which is why the
   // settle is unconditional.
-  if (pts > 0) award(name, pts)
-  else useGame.getState().settleTrick()
+  if (pts > 0) return award(name, pts)
+  useGame.getState().settleTrick()
+  return 0
 }
 
 function award(name, pts) {
@@ -927,6 +964,7 @@ function award(name, pts) {
   g.setCombo(trick.combo)
   g.showTrick(trick.combo > 1 ? `${name}  x${trick.combo}` : name, total)
   emit('trick', { name, points: total })
+  return total
 }
 
 // ------------------------------------------------------------------ anim
@@ -975,7 +1013,7 @@ function updateAnim(dt) {
   else P.riderPose = 'ride'
 
   // channels
-  const speedN = Math.min(1, P.speed / MAX_SPEED)
+  const speedN = Math.min(1, P.speed / (MAX_SPEED * movementScale()))
   // lean tracks the carve rate, not the other way round — at GRIP 15 a damp of
   // 7 lagged a side-to-side reversal enough to read as the dog leaning out of
   // its own carve; 11 matched. GRIP is 19 now, so the lean keeps pace at 13.
@@ -993,8 +1031,8 @@ function updateAnim(dt) {
   const pitchTarget = P.state === 'air' ? THREE.MathUtils.clamp(-P.vel.y * 0.035, -0.3, 0.3) : 0
   P.dogPitch = damp(P.dogPitch, P.state === 'bail' ? P.dogPitch : pitchTarget, 8, dt)
 
-  // The rendered dog is ~2.3m nose to tail (fitted length x LONG x the 1.58
-  // group scale): its straight body chord on the 2.6m quarter sags ~26cm below
+  // The default rendered dog is ~2.1m nose to tail. Its straight body chord on
+  // a tight quarter sags below
   // the arc — chord depth is L^2/8R, so it grew with the SQUARE of the size
   // bump (it was 12cm at 1.6m, gain 0.3 / cap 0.16).
   // Lift the rig along the normal by measured path curvature (turn of
@@ -1013,7 +1051,11 @@ function updateAnim(dt) {
       const dot = THREE.MathUtils.clamp(P.surfUp.dot(prevUp), -1, 1)
       curv = Math.max(curv, Math.acos(dot) / Math.max(P.speed * dt, 1e-4))
     }
-    lift = Math.min(0.34, curv * 0.66)
+    // Chord depth grows with length squared. The editor can resize the dog, so
+    // the clearance has to follow the visible body or a larger dog prints its
+    // nose and tail through a ramp while a smaller one floats above it.
+    const lengthK = movementScale()
+    lift = Math.min(0.34 * lengthK * lengthK, curv * 0.66 * lengthK * lengthK)
   }
   prevUp.copy(P.surfUp)
   P.surfLift = damp(P.surfLift, lift, lift > P.surfLift ? 25 : 4, dt)

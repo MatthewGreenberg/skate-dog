@@ -111,12 +111,14 @@ const moteMat = new THREE.MeshBasicMaterial({
   depthWrite: false,
 })
 
-const streakGeo = new THREE.BoxGeometry(0.03, 0.03, 1)
+// Hairline cross-section; view-plane orientation (streakAt) is what keeps it
+// readable at chase distance — the old 0.03 end-on stick was ~2px. Length = Z.
+const streakGeo = new THREE.BoxGeometry(0.05, 0.02, 1)
 const streakMat = new THREE.MeshBasicMaterial({
   color: '#ffffff',
   toneMapped: false,
   transparent: true,
-  opacity: 0.4,
+  opacity: 0.5,
   depthWrite: false,
 })
 
@@ -334,22 +336,40 @@ function stepTrash(mesh, dt) {
   pushColors(mesh, trash)
 }
 
-function streakAt() {
-  _fwd.copy(P.vel)
-  if (_fwd.lengthSq() < 1e-6) return
+function streakAt(camera) {
+  if (P.vel.lengthSq() < 1e-6) return
+  // Length lives in the VIEW PLANE, not along world travel. Aligning with
+  // velocity alone aimed the stick at the chase lens whenever you ran down the
+  // look axis — end-on, invisible. The intro orbit showed them because it
+  // spent half its time looking from the side.
+  camera.getWorldDirection(_up)
+  _fwd.copy(P.vel).normalize()
+  _fwd.addScaledVector(_up, -_fwd.dot(_up))
+  if (_fwd.lengthSq() < 1e-6) {
+    _fwd.crossVectors(_up, YUP)
+    if (_fwd.lengthSq() < 1e-6) _fwd.set(1, 0, 0)
+  }
   _fwd.normalize()
-  _q.setFromUnitVectors(FWD, _fwd)
-  // scatter in a loose tube around the player so lines whip past the camera
+  _right.crossVectors(_up, _fwd).normalize()
+  _v.crossVectors(_fwd, _right).normalize()
+  _m.makeBasis(_right, _v, _fwd)
+  _q.setFromRotationMatrix(_m)
+  // Tube around the dog, biased toward the lens so the whip-past crosses the
+  // frame instead of sitting on a silhouette 32m away.
   const a = Math.random() * TAU
-  const r = 0.45 + Math.random() * 0.7
+  const r = 0.5 + Math.random() * 0.85
+  _v.set(camera.position.x - P.pos.x, 0, camera.position.z - P.pos.z)
+  if (_v.lengthSq() > 1e-6) _v.normalize()
+  else _v.set(0, 0, 1)
+  const toward = 0.4 + Math.random() * 1.4
   const i = alloc(
     streak,
-    P.pos.x + Math.cos(a) * r - _fwd.x * 0.5,
-    P.pos.y + 0.3 + Math.random() * 0.9,
-    P.pos.z + Math.sin(a) * r - _fwd.z * 0.5,
+    P.pos.x + Math.cos(a) * r + _v.x * toward,
+    P.pos.y + 0.25 + Math.random() * 1.1,
+    P.pos.z + Math.sin(a) * r + _v.z * toward,
     0, 0, 0,
-    0.22 + Math.random() * 0.1,
-    0.8 + P.speed * 0.14, // length stretches with speed
+    0.28 + Math.random() * 0.12,
+    1.2 + P.speed * 0.18,
   )
   _q.toArray(streak.q, i * 4)
 }
@@ -810,13 +830,15 @@ export default function Effects() {
       t.current.airStar = 0
     }
 
-    // anime speed streaks once the player is really moving (ground, air, grind)
-    if (!low && P.speed > 7 && P.state !== 'bail') {
-      const iv = 0.05 / Math.min(2, P.speed / 8)
+    // anime speed streaks at a hard push only (~85% of MAX_SPEED / bowl cook).
+    // Kept on low quality at a slower rate — gating on !low meant any
+    // PerformanceMonitor dip erased them for the rest of the run.
+    if (P.speed > 11 && P.state !== 'bail') {
+      const iv = (0.05 * slow) / Math.min(2, P.speed / 11)
       t.current.streak += dt
       while (t.current.streak >= iv) {
         t.current.streak -= iv
-        streakAt()
+        streakAt(state.camera)
       }
     } else {
       t.current.streak = 0

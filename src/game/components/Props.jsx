@@ -1016,6 +1016,54 @@ function drawMural(kind, g) {
     }
     g.fillStyle = C.flowerYellow
     dot(g, 128, 108, 30)
+  } else if (kind === 'paws') {
+    // A paw trail walking a diagonal — pad + four toes, alternating inks,
+    // shrinking as it climbs so it reads as walking AWAY.
+    const paw = (px, py, s, rot) => {
+      g.save()
+      g.translate(px, py)
+      g.rotate(rot)
+      g.beginPath()
+      g.ellipse(0, 10 * s, 15 * s, 12 * s, 0, 0, TAU)
+      g.fill()
+      for (let i = 0; i < 4; i++) {
+        const a = -0.85 + i * 0.57
+        dot(g, Math.sin(a) * 19 * s, -8 * s - Math.cos(a) * 7 * s, 6 * s)
+      }
+      g.restore()
+    }
+    const inks = [C.flowerPink, CREAM, MINT]
+    for (let i = 0; i < 5; i++) {
+      const t = i / 4
+      g.fillStyle = inks[i % 3]
+      paw(52 + t * 152 + (i % 2 ? 9 : -9), 208 - t * 128, 1 - t * 0.2, -0.5 + t * 0.4 + (i % 2 ? 0.22 : -0.22))
+    }
+  } else if (kind === 'sunshine') {
+    g.strokeStyle = C.flowerYellow
+    g.lineWidth = 13
+    g.lineCap = 'round'
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * TAU
+      g.beginPath()
+      g.moveTo(128 + Math.cos(a) * 74, 148 + Math.sin(a) * 74)
+      g.lineTo(128 + Math.cos(a) * 96, 148 + Math.sin(a) * 96)
+      g.stroke()
+    }
+    g.fillStyle = C.flowerYellow
+    dot(g, 128, 148, 56)
+    // mint face on yellow — cream vanishes there at the mural's 0.78 alpha
+    g.fillStyle = MINT
+    dot(g, 110, 138, 8)
+    dot(g, 146, 138, 8)
+    g.strokeStyle = MINT
+    g.lineWidth = 7
+    g.lineCap = 'round'
+    g.beginPath()
+    g.arc(128, 150, 21, 0.4, Math.PI - 0.4)
+    g.stroke()
+    g.fillStyle = C.flowerPink
+    dot(g, 100, 160, 7)
+    dot(g, 156, 160, 7)
   } else if (kind === 'rainbow') {
     g.lineWidth = 15
     const bands = [C.flowerPink, '#f7c6a4', C.flowerYellow, MINT, '#cbb8f0']

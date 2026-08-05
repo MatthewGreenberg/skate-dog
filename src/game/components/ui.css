@@ -17,6 +17,13 @@
   --ink: rgba(40, 17, 70, 0.5);
 }
 
+/* The editor replaces GameUI, so its initial scene load needs its own HUD
+   host above the tool panel. Mode transitions still sit above this at z100. */
+.hud.ed-scene-loading {
+  z-index: 90;
+  pointer-events: auto;
+}
+
 /* The upper-frame haze wash lived here (a screen-space FOG_COLOR gradient on
    .hud::before) and was removed by request — the sky reads clean now. Don't
    reach for three's Fog to bring it back: it is keyed on DEPTH, so hazing the
@@ -305,6 +312,16 @@
 .hud-sheet-audio .hud-mute {
   position: static;
   flex: none;
+}
+.hud-sheet-home {
+  padding: calc(var(--u) * 0.35) calc(var(--u) * 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font: inherit;
+  font-size: calc(var(--u) * 0.78);
+  cursor: pointer;
 }
 .hud-sheet-foot {
   margin-top: calc(var(--u) * 0.9);
@@ -697,6 +714,98 @@
 .hud-play:active {
   transform: translateY(1px) scale(0.98);
 }
+.hud-doors {
+  display: flex;
+  gap: calc(var(--u) * 0.5);
+}
+/* saved-level cards: one scrollable cream strip, same chrome as the legend */
+.hud-levels {
+  pointer-events: auto;
+  display: flex;
+  gap: calc(var(--u) * 0.55);
+  margin-top: calc(var(--u) * 0.5);
+  padding: calc(var(--u) * 0.5);
+  border-radius: calc(var(--u) * 0.8);
+  background: rgba(253, 249, 243, 0.93);
+  box-shadow: 0 calc(var(--u) * 0.4) calc(var(--u) * 1.2) rgba(46, 20, 78, 0.25);
+  max-width: min(calc(var(--u) * 44), 94vw);
+  overflow-x: auto;
+}
+.hud-level {
+  position: relative;
+  flex: 0 0 auto;
+}
+.hud-level-go {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.25);
+  padding: calc(var(--u) * 0.3);
+  border-radius: calc(var(--u) * 0.55);
+  border: 1px solid rgba(90, 50, 150, 0.16);
+  background: #fff;
+  color: #2f1d4d;
+  font-family: inherit;
+  font-size: calc(var(--u) * 0.78);
+  font-weight: 800;
+  cursor: pointer;
+}
+.hud-level-go:hover {
+  transform: translateY(-1px);
+}
+.hud-level-go img,
+.hud-level-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--u) * 8);
+  height: calc(var(--u) * 5);
+  object-fit: cover;
+  border-radius: calc(var(--u) * 0.35);
+  background: #ece6f5;
+  font-size: calc(var(--u) * 2);
+}
+.hud-level-go b {
+  max-width: calc(var(--u) * 8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hud-level-x {
+  position: absolute;
+  top: calc(var(--u) * -0.35);
+  right: calc(var(--u) * -0.35);
+  width: calc(var(--u) * 1.25);
+  height: calc(var(--u) * 1.25);
+  border-radius: 999px;
+  border: 1px solid #fff;
+  background: #e2556f;
+  color: #fff;
+  font-size: calc(var(--u) * 0.65);
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* secondary door under PLAY: cream like the legend, quiet next to the purple */
+.hud-build {
+  pointer-events: auto;
+  margin-top: calc(var(--u) * 0.55);
+  padding: calc(var(--u) * 0.42) calc(var(--u) * 1.3);
+  border-radius: 999px;
+  border: 1px solid rgba(90, 50, 150, 0.18);
+  background: rgba(253, 249, 243, 0.93);
+  color: #4a3a63;
+  font-family: inherit;
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  box-shadow: 0 calc(var(--u) * 0.3) calc(var(--u) * 0.9) rgba(46, 20, 78, 0.22);
+  transition: transform 0.14s ease;
+}
+.hud-build:hover {
+  transform: translateY(-1px);
+}
 .hud-play-star {
   width: calc(var(--u) * 1.5);
   height: calc(var(--u) * 1.5);
@@ -854,4 +963,597 @@
   right: 8px !important;
   bottom: auto !important;
   opacity: 0.5;
+}
+
+/* ------------------------------------------------------------ level editor
+   Dev tool (?edit), components/EditorPanel.jsx.
+
+   Playful but not childish: cream card, chunky colour-coded tool tiles, one
+   loud PLAY. The old dark monospace strip was honest about what it is (a
+   property grid) and that was the problem — it taught you to look for fields
+   instead of for the thing you wanted to place.
+
+   It is still deliberately NOT the HUD's translucent purple or its --u unit:
+   the HUD scales with the viewport because it sits over the game, and this
+   sits over an orbit view you are working in at a fixed size. --e is its own
+   unit for the same reason --u is the HUD's.
+   Left edge — the HUD's pills own both top corners. */
+@font-face {
+  font-family: 'Luckiest Guy';
+  src: url('/fonts/LuckiestGuy-Regular.ttf') format('truetype');
+  font-display: swap;
+}
+
+.ed-panel {
+  --e: 14px;
+  --ed-ink: #332447;
+  --ed-dim: #6f6182;
+  --ed-face: #fffdf9;
+  --ed-line: #ded5e6;
+  --ed-accent: #6748dd;
+
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  bottom: 10px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(360px, calc(100vw - 20px));
+  padding: 16px;
+  box-sizing: border-box;
+  background: var(--ed-face);
+  border: 2px solid #fff;
+  border-radius: 22px;
+  /* One soft drop, not a float: the panel is a card lying on the park. */
+  box-shadow: 0 10px 26px rgba(46, 26, 78, 0.24);
+  color: var(--ed-ink);
+  font: var(--e)/1.45 ui-rounded, 'SF Pro Rounded', 'Nunito', system-ui, sans-serif;
+  overflow: hidden;
+}
+.ed-panel button,
+.ed-panel input,
+.ed-panel select,
+.ed-panel summary {
+  font: inherit;
+  color: var(--ed-ink);
+  background: #fff;
+  border: 1.5px solid var(--ed-line);
+  border-radius: 10px;
+  padding: 7px 10px;
+}
+/* A toy button presses IN. The 1px translate on :active is most of why the
+   panel reads as physical rather than as a form. */
+.ed-panel button {
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: 0 2px 0 rgba(80, 56, 120, 0.14);
+  transition: transform 80ms, box-shadow 80ms, background 90ms;
+}
+.ed-panel button:hover:not(:disabled) { background: #f6f1ff; }
+.ed-panel button:active:not(:disabled) { transform: translateY(2px); box-shadow: none; }
+.ed-panel button:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
+.ed-panel button.on {
+  background: var(--ed-accent);
+  border-color: #6a4ce0;
+  color: #fff;
+}
+.ed-panel input:focus,
+.ed-panel select:focus { outline: 2px solid var(--ed-accent); outline-offset: -2px; }
+
+.ed-head { display: flex; align-items: center; gap: 10px; padding: 0 2px; }
+.ed-head-copy { display: flex; flex-direction: column; min-width: 0; }
+.ed-head h1 {
+  margin: 0;
+  font-family: 'Luckiest Guy', ui-rounded, system-ui, sans-serif;
+  font-size: 21px;
+  line-height: 1.05;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  color: #5a3fd0;
+}
+.ed-head p { margin: 2px 0 0; font-size: 11px; color: var(--ed-dim); }
+.ed-dot {
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--ed-line);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 10px;
+  color: var(--ed-dim);
+}
+.ed-dot.on { color: #38a06a; }
+.ed-dot::before { content: '● '; }
+.ed-panel .ed-home {
+  padding: 4px 9px;
+  border: 1px solid var(--ed-line);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ed-panel .ed-home:hover { background: #f4f0ff; }
+
+/* The panel is a fixed card and the toy box + card + drawers overflow it on a
+   short window; only this middle strip scrolls, so PLAY never leaves the
+   screen. */
+.ed-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #c8bcda transparent;
+}
+
+/* The editor follows the same two-step loop as the viewport: add something,
+   then tune the selection. Global settings stay clearly separate. */
+.ed-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--ed-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+}
+.ed-section-head { display: flex; align-items: flex-start; gap: 9px; }
+.ed-section-head > div { min-width: 0; }
+.ed-section-head h2 {
+  margin: 0;
+  color: var(--ed-ink);
+  font-size: 13px;
+  line-height: 1.2;
+}
+.ed-section-head p {
+  margin: 2px 0 0;
+  color: var(--ed-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.ed-step {
+  display: grid;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ed-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 0 2px 0 #4931ae;
+}
+
+/* ---- the toy box. Three columns keeps all nine visible without scrolling. */
+.ed-toys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.ed-toy {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 62px;
+  padding: 9px 4px 7px !important;
+  background: var(--tint) !important;
+  border-color: rgba(90, 63, 208, 0.14) !important;
+}
+.ed-toy:hover:not(:disabled) { transform: translateY(-1px); }
+/* Armed reads as LIFTED and outlined, not recoloured: the tint is how you
+   recognise the tool, so overriding it with the accent makes the armed tool
+   the one you can no longer identify. */
+.ed-toy.on {
+  background: var(--tint) !important;
+  color: var(--ed-ink) !important;
+  border: 2.5px solid var(--ed-accent) !important;
+  box-shadow: 0 0 0 3px rgba(122, 92, 240, 0.2);
+}
+.ed-toy.scoped { border-color: rgba(122, 92, 240, 0.45) !important; }
+.ed-toy i { font-style: normal; font-size: 21px; line-height: 1; }
+.ed-toy span { font-size: 11px; font-weight: 750; line-height: 1.1; }
+/* The 1..9 hint is a hint: readable if you look for it, silent if you don't. */
+.ed-toy u {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  font-size: 9px;
+  text-decoration: none;
+  opacity: 0.4;
+}
+
+/* ---- coach line. Always the NEXT action, never the current state. */
+.ed-coach {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: #f2ecff;
+  border-left: 3px solid #a48cef;
+  color: #514072;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.ed-coach.armed { background: #fff3cf; border-left-color: #e6a826; color: #65470c; font-weight: 700; }
+/* placementInfo warning — the ghost went amber, the line says why */
+.ed-coach.warn { background: #ffe0d6; border-left-color: #e96f4d; color: #7a3019; font-weight: 700; }
+
+/* ---- the selected thing. */
+.ed-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--tint) 55%, #fff);
+  border: 1.5px solid rgba(90, 63, 208, 0.16);
+}
+.ed-card-head { display: flex; align-items: baseline; gap: 7px; padding-bottom: 2px; }
+.ed-card-head i { font-style: normal; font-size: 16px; }
+.ed-card-head b { font-size: 13px; }
+.ed-card-head em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--ed-dim); }
+
+.ed-characters .ed-note {
+  padding: 3px 4px 0;
+  line-height: 1.3;
+}
+
+.ed-row { display: flex; align-items: center; gap: 6px; }
+.ed-row > span { flex: 0 0 52px; font-size: 11.5px; font-weight: 650; color: var(--ed-dim); }
+
+/* ---- material swatches. --sw may be a flat colour OR a gradient, so it
+   lands on `background`, not background-color. */
+.ed-swatches { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
+.ed-swatches button {
+  flex: 0 0 auto !important;
+  width: 28px;
+  height: 28px;
+  padding: 0 !important;
+  border-radius: 50%;
+  background: var(--sw) !important;
+  border: 2px solid rgba(60, 40, 120, 0.18);
+}
+.ed-swatches button.on {
+  border-color: #fff;
+  outline: 2.5px solid var(--ed-accent);
+  outline-offset: 1px;
+}
+.ed-patterns .ed-swatches button {
+  width: 36px;
+  height: 26px;
+  border-radius: 7px;
+}
+/* Big square steppers — the one control a kid finds first. */
+.ed-row button { flex: 1 1 0; min-height: 34px; padding: 6px 0 !important; font-size: 15px; }
+.ed-row-wide button { flex: 1 1 0; font-size: 12px; }
+.ed-bin { color: #b03a5a !important; }
+
+/* Park-wide controls are useful but not part of the main add/edit loop. */
+.ed-settings { padding: 0; overflow: clip; }
+.ed-settings > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  list-style: none;
+}
+.ed-settings > summary::-webkit-details-marker { display: none; }
+.ed-settings > summary::after {
+  content: '›';
+  margin-left: auto;
+  color: var(--ed-dim);
+  font-size: 20px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 120ms;
+}
+.ed-settings[open] > summary::after { transform: rotate(90deg); }
+.ed-settings > summary > span:nth-child(2) { display: flex; flex-direction: column; }
+.ed-settings > summary b { font-size: 12px; }
+.ed-settings > summary small { margin-top: 1px; color: var(--ed-dim); font-size: 10.5px; }
+.ed-section-icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 8px;
+  background: #eee8ff;
+  color: var(--ed-accent);
+}
+.ed-settings-body { display: flex; flex-direction: column; gap: 8px; padding: 0 10px 10px; }
+
+.ed-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed #cfc3da;
+  border-radius: 12px;
+  background: #faf8fc;
+  color: var(--ed-dim);
+}
+.ed-empty > span { flex: 0 0 auto; font-size: 22px; color: #9c88b8; }
+.ed-empty p { margin: 0; font-size: 11px; line-height: 1.4; }
+.ed-empty b { display: block; margin-bottom: 2px; color: var(--ed-ink); font-size: 11.5px; }
+
+.ed-special-card { gap: 9px; }
+.ed-readouts { display: grid; grid-template-columns: 1fr 1fr 1.35fr; gap: 6px; }
+.ed-readouts > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 8px;
+  border: 1px solid rgba(90, 63, 208, 0.13);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.64);
+}
+.ed-readouts small { color: var(--ed-dim); font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.ed-readouts b { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+/* ---- drawers. Native <details>: the panel needs no open/closed state. */
+.ed-more > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ed-dim);
+  background: transparent;
+  border-color: transparent;
+  padding: 5px 2px;
+}
+.ed-more > summary::-webkit-details-marker { display: none; }
+.ed-more > summary::before { content: '▸ '; }
+.ed-more[open] > summary::before { content: '▾ '; }
+.ed-more > summary:hover { color: var(--ed-accent); }
+
+.ed-group + .ed-group { margin-top: 6px; }
+.ed-group h4 {
+  margin: 0 0 3px;
+  color: var(--ed-dim);
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ed-field { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 11px; }
+.ed-field span { flex: 0 0 62px; color: var(--ed-dim); }
+.ed-field input,
+.ed-field select { flex: 1 1 auto; min-width: 0; padding: 5px 7px; }
+
+.ed-outliner .ed-list {
+  max-height: 30vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ed-list button {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  text-align: left;
+  font-weight: 400;
+  font-size: 11px;
+  padding: 6px 8px;
+}
+.ed-list b { flex: 0 0 auto; }
+.ed-list i { color: var(--ed-dim); font-style: normal; }
+.ed-list em { margin-left: auto; color: var(--ed-dim); font-style: normal; }
+
+.ed-bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 4px; }
+.ed-bar button { font-size: 11px; font-weight: 600; }
+
+.ed-manage {
+  padding: 8px 12px;
+  border: 1px solid var(--ed-line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.ed-keys { color: var(--ed-dim); font-size: 10px; }
+.ed-keys p { display: flex; gap: 6px; margin: 0 0 1px; }
+.ed-keys kbd { flex: 0 0 46px; font: inherit; text-align: right; }
+
+/* ---- the foot never scrolls: PLAY is the primary action of the whole tool
+   and everything else here is in service of getting back onto the dog. */
+.ed-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px solid rgba(222, 213, 230, 0.8);
+}
+.ed-chips { display: flex; gap: 5px; align-items: center; padding-top: 8px; }
+.ed-chips button { font-size: 11px; white-space: nowrap; }
+.ed-snaps { display: flex; gap: 3px; margin-left: auto; }
+.ed-snaps button { font-size: 10.5px; padding: 5px 7px !important; }
+
+/* Save sits above PLAY: same shape, quieter — mint against PLAY's gold. */
+.ed-panel .ed-save {
+  padding: 8px !important;
+  background: linear-gradient(#d7f2e4, #b5e6cd) !important;
+  border: 2px solid #fff !important;
+  border-radius: 12px !important;
+  color: #1f5c40 !important;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 3px 0 #8fceac;
+}
+.ed-panel .ed-save:active { transform: translateY(3px); box-shadow: none; }
+
+/* Specificity, not decoration: `.ed-panel button` sets a `font:` shorthand,
+   which beats a bare `.ed-play { font-family }` and would silently drop the
+   comic face back to the panel's rounded sans. */
+.ed-panel .ed-play {
+  padding: 11px 8px 9px !important;
+  background: linear-gradient(#ffd45e, #ffab2e) !important;
+  border: 2.5px solid #fff !important;
+  border-radius: 15px !important;
+  color: #4a2c00 !important;
+  font-family: 'Luckiest Guy', ui-rounded, system-ui, sans-serif;
+  font-size: 19px;
+  letter-spacing: 0.03em;
+  box-shadow: 0 4px 0 #d98a12;
+}
+.ed-panel .ed-play:hover:not(:disabled) { background: linear-gradient(#ffdd7d, #ffb949) !important; }
+.ed-panel .ed-play:active:not(:disabled) { transform: translateY(4px); box-shadow: none; }
+.ed-panel .ed-play em {
+  display: block;
+  font-family: inherit;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+}
+
+.ed-note { margin: 0; color: var(--ed-dim); font-size: 11px; }
+
+/* The stepper's readout sits BETWEEN its two buttons rather than in the label,
+   so the number is where your eye already is when you click. */
+.ed-row > b {
+  flex: 0 0 52px;
+  text-align: center;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ed-dim);
+}
+/* Rotate-while-holding rides in the hint strip: it applies to the ghost, which
+   is not a selection and has no card. */
+.ed-spin { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; vertical-align: middle; }
+.ed-spin button { padding: 3px 8px !important; font-size: 12px; }
+.ed-spin b { font-variant-numeric: tabular-nums; font-size: 10px; }
+
+/* Selects the pool, which is the one park feature you can edit but never
+   place — so it has no palette tile to be found in. */
+.ed-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 11.5px;
+  padding: 7px 10px !important;
+  background: #eaf6ff !important;
+  border-color: rgba(60, 120, 190, 0.28) !important;
+}
+.ed-pick span { font-weight: 750; }
+.ed-pick small { color: var(--ed-dim); font-size: 10px; font-weight: 600; }
+.ed-panel .ed-pick.on { background: var(--ed-accent) !important; color: #fff !important; }
+.ed-panel .ed-pick.on small { color: rgba(255, 255, 255, 0.76); }
+
+@media (max-height: 700px) {
+  .ed-panel { top: 6px; bottom: 6px; padding: 12px; gap: 8px; }
+  .ed-head p { display: none; }
+  .ed-toy { min-height: 56px; padding-top: 7px !important; }
+}
+
+/* The editor and play-test are different workspaces, not two panels in the
+   same view. This brief cover gives the camera/UI swap a visible midpoint and
+   also hides the one-off scene rebake that happens on play-test entry. */
+.ed-mode-transition {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  pointer-events: auto;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(154, 110, 226, 0.46), transparent 42%),
+    rgba(42, 24, 72, 0.82);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  animation: edModeCover 680ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.ed-mode-transition.is-editor {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255, 196, 74, 0.34), transparent 42%),
+    rgba(42, 24, 72, 0.82);
+}
+.ed-mode-transition-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: min(330px, calc(100vw - 40px));
+  padding: 15px 19px;
+  border: 2px solid rgba(255, 255, 255, 0.86);
+  border-radius: 18px;
+  background: rgba(255, 253, 249, 0.96);
+  box-shadow: 0 12px 34px rgba(30, 14, 54, 0.3);
+  color: #332447;
+  font-family: ui-rounded, 'SF Pro Rounded', 'Nunito', system-ui, sans-serif;
+  animation: edModeCard 680ms cubic-bezier(0.34, 1.25, 0.5, 1) both;
+}
+.ed-mode-transition-icon {
+  display: grid;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 13px;
+  background: linear-gradient(#8e68e0, #6842c2);
+  box-shadow: 0 3px 0 #4c2c9d;
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+}
+.is-editor .ed-mode-transition-icon {
+  background: linear-gradient(#ffd45e, #ffab2e);
+  box-shadow: 0 3px 0 #d98a12;
+  color: #4a2c00;
+  font-size: 25px;
+}
+.ed-mode-transition-copy { display: flex; flex-direction: column; gap: 2px; }
+.ed-mode-transition-copy b {
+  font-family: 'Luckiest Guy', ui-rounded, system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.025em;
+}
+.ed-mode-transition-copy small { color: #6f6182; font-size: 12px; font-weight: 650; }
+.ed-mode-transition-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 5px;
+  background: #ffd45e;
+  transform-origin: left;
+  animation: edModeProgress 680ms ease-out both;
+}
+.is-editor .ed-mode-transition-progress { background: #a68aee; }
+
+@keyframes edModeCover {
+  0% { opacity: 0; }
+  32%, 68% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes edModeCard {
+  0% { opacity: 0; transform: translateY(12px) scale(0.96); }
+  34%, 66% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-8px) scale(0.98); }
+}
+@keyframes edModeProgress {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ed-mode-transition,
+  .ed-mode-transition-card { animation-name: edModeFade; }
+  .ed-mode-transition-progress { animation: none; transform: scaleX(1); }
+}
+@keyframes edModeFade {
+  0%, 100% { opacity: 0; }
+  32%, 68% { opacity: 1; }
 }

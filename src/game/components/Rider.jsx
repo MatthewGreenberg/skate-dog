@@ -119,7 +119,7 @@ function recolorMap(mat, deg) {
   mat.map = tex
 }
 
-export default function Rider() {
+export default function Rider({ dogSize, boySize, dogTall }) {
   const root = useRef()
   const body = useRef()
   const { scene } = useGLTF(URL, DRACO_PATH)
@@ -161,7 +161,12 @@ export default function Rider() {
 
     // ---- root: lifts clear of the dog, leans into turns, folds on impact
     const rootPitch = P.stretch * 0.16 - P.crouch * 0.18
-    root.current.position.y = backY() - SINK + P.riderLift * 0.3
+    // Scale about the planted feet, not about the player's origin. backY()
+    // follows the DOG; the boy's own scale only changes the body above that
+    // contact plane. This is what lets the editor vary both independently
+    // without the rider floating or sinking beside his dog.
+    root.current.scale.setScalar(boySize)
+    root.current.position.y = backY(dogSize, dogTall) - SINK * boySize + P.riderLift * 0.3 * boySize
     root.current.rotation.z = -P.lean * 0.24
     root.current.rotation.x = rootPitch
 
@@ -211,7 +216,7 @@ export default function Rider() {
   })
 
   return (
-    <group ref={root} position={[0, backY(), 0]}>
+    <group ref={root} position={[0, backY(dogSize, dogTall), 0]} scale={boySize}>
       {/* body is the pelvis: the model hangs off it with its hip on the origin */}
       <group ref={body}>
         <primitive object={scene} position={rig.hip.clone().negate()} />

@@ -3,7 +3,7 @@
 // smooth ramps; the bowl uses its analytic height field. A uniform grid does
 // broad phase so we never test the whole park per frame.
 
-import { SOLIDS, WALLS, PLANTERS, PERIMETER, BENCHES, LAMPS } from './levelData.js'
+import { SOLIDS, WALLS, PLANTERS, PERIMETER, BENCHES, LAMPS, BOWL } from './levelData.js'
 import { bowlHeight, bowlNormal, isInsideBowl } from './bowlGeometry.js'
 
 export const STEP_UP = 0.55 // how far the player can be pulled up onto a ledge
@@ -39,30 +39,33 @@ function addRect(o) {
   return col
 }
 
-for (const s of SOLIDS) {
-  if (s.kind === 'box') {
-    addRect({ ...s, type: s.style === 'ledge' ? 'ledge' : 'concrete', shape: 'flat', top: s.top })
-  } else {
-    // shift + grow the footprint so the ramp overlaps the deck it feeds into
-    const rot = s.rot
-    addRect({
-      ...s,
-      x: s.x + Math.sin(rot) * (RAMP_OVER / 2),
-      z: s.z + Math.cos(rot) * (RAMP_OVER / 2),
-      d: s.d + RAMP_OVER,
-      shape: 'ramp',
-      run: s.d,
-      type: s.kind === 'stairs' ? 'stairs' : 'ramp',
-    })
+function addAll() {
+  for (const s of SOLIDS) {
+    if (s.kind === 'box') {
+      addRect({ ...s, type: s.style === 'ledge' ? 'ledge' : 'concrete', shape: 'flat', top: s.top })
+    } else {
+      // shift + grow the footprint so the ramp overlaps the deck it feeds into
+      const rot = s.rot
+      addRect({
+        ...s,
+        x: s.x + Math.sin(rot) * (RAMP_OVER / 2),
+        z: s.z + Math.cos(rot) * (RAMP_OVER / 2),
+        d: s.d + RAMP_OVER,
+        shape: 'ramp',
+        run: s.d,
+        type: s.kind === 'stairs' ? 'stairs' : 'ramp',
+      })
+    }
+  }
+
+  for (const w of WALLS) {
+    addRect({ ...w, id: 'wall', shape: 'flat', type: 'cap', top: (w.base || 0) + w.h })
+  }
+  for (const p of PLANTERS) {
+    addRect({ ...p, rot: p.rot || 0, id: 'planter', shape: 'flat', type: 'planter', top: (p.base || 0) + p.h })
   }
 }
-
-for (const w of WALLS) {
-  addRect({ ...w, id: 'wall', shape: 'flat', type: 'cap', top: (w.base || 0) + w.h })
-}
-for (const p of PLANTERS) {
-  addRect({ ...p, rot: p.rot || 0, id: 'planter', shape: 'flat', type: 'planter', top: (p.base || 0) + p.h })
-}
+addAll()
 
 // ------------------------------------------------------------ broad phase
 // Buckets are dilated by the largest query radius: bucket(x,z) returns one
@@ -74,17 +77,21 @@ for (const p of PLANTERS) {
 const GRID_PAD = 0.6
 const grid = new Map()
 const key = (ix, iz) => ix * 8192 + iz
-for (let i = 0; i < cols.length; i++) {
-  const c = cols[i]
-  for (let ix = Math.floor((c.minX - GRID_PAD) / CELL); ix <= Math.floor((c.maxX + GRID_PAD) / CELL); ix++) {
-    for (let iz = Math.floor((c.minZ - GRID_PAD) / CELL); iz <= Math.floor((c.maxZ + GRID_PAD) / CELL); iz++) {
-      const k = key(ix, iz)
-      let a = grid.get(k)
-      if (!a) grid.set(k, (a = []))
-      a.push(c)
+function addToGrid() {
+  for (let i = 0; i < cols.length; i++) {
+    const c = cols[i]
+    for (let ix = Math.floor((c.minX - GRID_PAD) / CELL); ix <= Math.floor((c.maxX + GRID_PAD) / CELL); ix++) {
+      for (let iz = Math.floor((c.minZ - GRID_PAD) / CELL); iz <= Math.floor((c.maxZ + GRID_PAD) / CELL); iz++) {
+        const k = key(ix, iz)
+        let a = grid.get(k)
+        if (!a) grid.set(k, (a = []))
+        a.push(c)
+      }
     }
   }
 }
+addToGrid()
+
 const EMPTY = []
 function bucket(x, z) {
   return grid.get(key(Math.floor(x / CELL), Math.floor(z / CELL))) || EMPTY
@@ -158,7 +165,10 @@ export function sampleSurface(x, z, feetY, out = _out) {
   out.inBowl = false
   out.id = null
 
-  if (isInsideBowl(x, z)) {
+  // BOWL.on false = the editor deleted the bowl; the plaza is drawn without
+  // its cutout, so the hole must stop existing here too or you fall into an
+  // invisible one.
+  if (BOWL.on && isInsideBowl(x, z)) {
     out.y = bowlHeight(x, z)
     const n = bowlNormal(x, z)
     out.nx = n.x
@@ -320,9 +330,24 @@ export function resolveCollision(p, feetY, radius, push = _push) {
 
 export const COLLIDERS = cols
 
+// Level-editor hook. cols/grid are built once at module load and PlayerController
+// holds `COLLIDERS` by reference, so a rebuild refills both IN PLACE rather than
+// reassigning. Without this the editor is visual-only — you'd move a ramp and
+// ride straight through where it used to be. AO_FOOTPRINTS is refilled the same
+// way (in place, same array) — it is the baked contact shadow under every prop,
+// and left alone the plaza keeps the shadows of rows you already moved.
+export function rebuildColliders() {
+  cols.length = 0
+  grid.clear()
+  addAll()
+  addToGrid()
+  AO_FOOTPRINTS.length = 0
+  AO_FOOTPRINTS.push(...aoFootprints())
+}
+
 // Footprints for the baked top-down occlusion map. Only things standing on the
 // plaza contribute; anything already up on a deck would darken the wrong floor.
-export const AO_FOOTPRINTS = [
+const aoFootprints = () => [
   ...cols
     .filter((c) => (c.base || 0) < 0.2)
     .map((c) => ({
@@ -336,3 +361,5 @@ export const AO_FOOTPRINTS = [
   ...BENCHES.filter((b) => !b.base).map((b) => ({ x: b.x, z: b.z, hw: 0.85, hd: 0.3, rot: b.rot || 0, height: 0.5 })),
   ...LAMPS.filter((l) => !l.base).map((l) => ({ x: l.x, z: l.z, hw: 0.28, hd: 0.28, rot: 0, height: 0.9 })),
 ]
+
+export const AO_FOOTPRINTS = aoFootprints()

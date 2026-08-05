@@ -85,25 +85,37 @@ function lipEdges() {
   return out
 }
 
-export const PATHS = [...RAILS, ...lipEdges()].map((r) => {
-  const pts = r.pts.map((p) => new THREE.Vector3(p[0], p[1], p[2]))
-  const segs = []
-  let len = 0
-  for (let i = 0; i < pts.length - 1; i++) {
-    const dir = new THREE.Vector3().subVectors(pts[i + 1], pts[i])
-    const l = dir.length()
-    if (l < 1e-4) continue
-    dir.divideScalar(l)
-    segs.push({ a: pts[i], dir, len: l, start: len })
-    len += l
+export const PATHS = []
+
+// Refilled IN PLACE by the level editor (PlayerController holds the array by
+// reference). Called once here so module load is unchanged.
+export function rebuildPaths() {
+  PATHS.length = 0
+  for (const r of [...RAILS, ...lipEdges()]) {
+      const pts = r.pts.map((p) => new THREE.Vector3(p[0], p[1], p[2]))
+      const segs = []
+      let len = 0
+      for (let i = 0; i < pts.length - 1; i++) {
+        const dir = new THREE.Vector3().subVectors(pts[i + 1], pts[i])
+        const l = dir.length()
+        // NOT `l < 1e-4`: a row missing `rot` makes every coordinate NaN, and
+        // NaN fails that test, so the degenerate segment was KEPT — with a NaN
+        // tangent that then lost every `d2 < best.d2` in closestOn and left
+        // findGrind holding a null tan. Written this way NaN is dropped here.
+        if (!(l > 1e-4)) continue
+        dir.divideScalar(l)
+        segs.push({ a: pts[i], dir, len: l, start: len })
+        len += l
+      }
+      const mid = new THREE.Vector3()
+      for (const p of pts) mid.add(p)
+      mid.divideScalar(pts.length)
+      let radius = 0
+      for (const p of pts) radius = Math.max(radius, p.distanceTo(mid))
+    PATHS.push({ ...r, pts, segs, length: len, mid, radius })
   }
-  const mid = new THREE.Vector3()
-  for (const p of pts) mid.add(p)
-  mid.divideScalar(pts.length)
-  let radius = 0
-  for (const p of pts) radius = Math.max(radius, p.distanceTo(mid))
-  return { ...r, pts, segs, length: len, mid, radius }
-})
+}
+rebuildPaths()
 
 const _a = new THREE.Vector3()
 
@@ -162,6 +174,10 @@ export function findGrind(x, feetY, z, vx, vz) {
     if (Math.abs(z - rail.mid.z) > rail.radius + 3) continue
 
     const hit = closestOn(rail, x, feetY, z)
+    // No segment won, so there is nothing to grind and no tangent to align
+    // against. Belt to the NaN brace above: the editor can author a row into
+    // this array at any time, and a bad row must not be able to crash the sim.
+    if (!hit.tan) continue
     const p = railAt(rail, hit.s, _a)
     const dxz = Math.hypot(p.x - x, p.z - z)
     const dy = feetY - p.y

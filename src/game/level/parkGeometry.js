@@ -17,17 +17,21 @@ export function buildPlazaGeometry() {
   s.lineTo(P.minX - pad, -(P.maxZ + pad))
   s.closePath()
 
-  const hole = new THREE.Path()
-  const N = 180
-  for (let i = 0; i <= N; i++) {
-    const phi = (i / N) * Math.PI * 2
-    const r = bowlRadius(phi)
-    const x = BOWL.cx + Math.cos(phi) * r
-    const z = BOWL.cz + Math.sin(phi) * r
-    if (i === 0) hole.moveTo(x, -z)
-    else hole.lineTo(x, -z)
+  // BOWL.on false (editor "delete the bowl") = an unbroken slab. Skatepark
+  // remounts on the level version, so this memo re-runs on the toggle.
+  if (BOWL.on) {
+    const hole = new THREE.Path()
+    const N = 180
+    for (let i = 0; i <= N; i++) {
+      const phi = (i / N) * Math.PI * 2
+      const r = bowlRadius(phi)
+      const x = BOWL.cx + Math.cos(phi) * r
+      const z = BOWL.cz + Math.sin(phi) * r
+      if (i === 0) hole.moveTo(x, -z)
+      else hole.lineTo(x, -z)
+    }
+    s.holes.push(hole)
   }
-  s.holes.push(hole)
 
   const g = new THREE.ShapeGeometry(s, 12)
   g.rotateX(-Math.PI / 2)

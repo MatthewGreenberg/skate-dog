@@ -72,7 +72,43 @@ for (let i = 0; i < 300 && P.state !== 'ground'; i++) updatePlayer(DT)
 for (let i = 0; i < 72; i++) updatePlayer(DT) // 1.2s of plain rolling
 assert.equal(useGame.getState().combo, 0, 'rolling between tricks must end the chain')
 
-// 5. pool gap: fly across the bowl and land clear of the rim, vs the same air
+// 5. a banked trick pays an immediate landing boost, and the boost follows the
+// displayed trick score. These two airs have identical starting velocity; the
+// second adds a 180 to the same grab, so only its score changes.
+function landTrick(spin) {
+  input.grab = false
+  input.steer = 0
+  resetPlayer()
+  P.pos.set(20, 0, 20)
+  P.vel.set(0, 0, 0)
+  P.heading = Math.PI / 2
+  for (let i = 0; i < 72; i++) updatePlayer(DT) // clear any live chain
+
+  useGame.setState({ score: 0, combo: 0 })
+  P.pos.set(20, 0.6, 20)
+  P.vel.set(5, 4, 0)
+  P.state = 'air'
+  P.grounded = false
+  input.grab = true
+  input.steer = spin ? 1 : 0
+  for (let i = 0; i < 120 && P.state === 'air'; i++) updatePlayer(DT)
+  input.grab = false
+  input.steer = 0
+  assert.equal(P.state, 'ground', 'test trick never landed')
+  return { score: useGame.getState().score, speed: P.vel.length() }
+}
+
+const grabLanding = landTrick(false)
+const spinGrabLanding = landTrick(true)
+assert.equal(grabLanding.score, 80, 'grab setup should bank its base score')
+assert.equal(spinGrabLanding.score, 190, 'spin + grab setup should bank the higher score')
+assert(grabLanding.speed > 5, 'a scored landing must boost the incoming speed')
+assert(
+  spinGrabLanding.speed > grabLanding.speed,
+  'the higher-scoring trick must give the larger landing boost',
+)
+
+// 6. pool gap: fly across the bowl and land clear of the rim, vs the same air
 // dropped INTO the bowl — only the first pays. Bowl is r~5.85 at (-15, -4).
 function flyAcross(vx, vy, from = [-9, 0.3, -1]) {
   resetPlayer()

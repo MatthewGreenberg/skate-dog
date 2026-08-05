@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { P } from '../store.js'
 import { input } from '../input.js'
 import { updatePlayer, resetPlayer } from './PlayerController.js'
+import { applyCharacterSizes, characterSize } from '../components/dogFit.js'
 
 // Travel direction for a heading, and the dog's own right-hand direction:
 // in a Y-up right-handed frame, right = forward x up.
@@ -30,6 +31,28 @@ assert(turn(-1) < -0.01, 'steering left must turn the dog toward its left')
 // projects to sin(0.94) = 0.81 on the right axis — assert well below that so
 // only a real regression toward mush (sub ~3.2 rad/s) fails, not a retune.
 assert(turn(1) > 0.6, `low-speed carve went soft: ${turn(1).toFixed(2)} on the right axis, want > 0.6`)
+
+// Pace is measured in dog-lengths per second: resizing the dog must scale its
+// world-space acceleration instead of making the larger character feel slow.
+const originalSize = characterSize()
+function speedAtSize(dog) {
+  applyCharacterSizes(dog, originalSize.boy)
+  resetPlayer()
+  input.steer = 0
+  input.throttle = 1
+  input.brake = false
+  input.reverse = false
+  for (let i = 0; i < 30; i++) updatePlayer(1 / 60)
+  return P.speed
+}
+const smallDogSpeed = speedAtSize(0.95)
+const bigDogSpeed = speedAtSize(2.2)
+applyCharacterSizes(originalSize.dog, originalSize.boy)
+input.throttle = 0
+assert(
+  bigDogSpeed > smallDogSpeed * 2,
+  `large dog must move proportionally faster (${smallDogSpeed.toFixed(2)} vs ${bigDogSpeed.toFixed(2)})`,
+)
 
 // the visual lean has to agree with the turn or the dog leans out of its carve
 resetPlayer()

@@ -5,6 +5,7 @@ import { Environment, Lightformer } from '@react-three/drei'
 import { C, LIGHT, mix } from '../palette.js'
 import { P, useGame } from '../store.js'
 import { TOUCH } from '../input.js'
+import { useEditing, useSceneSettings, timeOf, groundOf } from '../level/levelEdits.js'
 
 // The whole rig is the decomposition in palette.js made real: a golden key and a
 // violet sky that sum to white. Every colour, every direction and the haze come
@@ -272,6 +273,21 @@ export default function Lighting() {
   const key = useRef()
   const target = useRef()
   const quality = useGame((s) => s.quality)
+  const editing = useEditing()
+
+  // Time-of-day preset from the editor's scene store. 'sunset' (the shipped default,
+  // and the only value a plain visit can hold) carries no overrides, so every
+  // ?? and ×1 below is identity and the measured rig renders untouched.
+  const time = useSceneSettings((s) => s.time)
+  const ground = useSceneSettings((s) => s.ground)
+  const tod = timeOf(time)
+  const theme = groundOf(ground)
+  const keyK = tod.keyK ?? 1
+  const ambK = tod.amb ?? 1
+  const envK = tod.envK ?? 1
+  const sky = theme.air ? mix(tod.sky ?? C.sky, theme.air, theme.airK) : (tod.sky ?? C.sky)
+  const skyHigh = tod.skyHigh ?? C.skyHigh
+  const fog = theme.air ? mix(tod.fog ?? FOG_COLOR, theme.air, theme.airK * 0.55) : (tod.fog ?? FOG_COLOR)
 
   const fillPos = useMemo(
     () => new THREE.Vector3(...LIGHT.fillDir).normalize().multiplyScalar(26),
@@ -296,7 +312,7 @@ export default function Lighting() {
     shadow.map = null
     shadow.mapPass?.dispose() // VSM ping-pong target: three never disposes this one
     shadow.mapPass = null
-  }, [quality])
+  }, [quality, editing])
 
   useFrame(({ camera }) => {
     if (!key.current || !target.current) return
@@ -362,32 +378,34 @@ export default function Lighting() {
 
   return (
     <>
-      <color attach="background" args={[C.sky]} />
+      <color attach="background" args={[sky]} />
       {/* Linear rather than exp2, and starting past the hero — see FOG_NEAR.
           The colour is still the sunlit-AIR value and not the sky: hazing
           toward a cool blue punches a cold hole in the middle of a warm frame.
-          three runs smoothstep(near, far, depth), so there is no onset ring. */}
-      <fog attach="fog" args={[FOG_COLOR, FOG_NEAR, FOG_FAR]} />
+          three runs smoothstep(near, far, depth), so there is no onset ring.
+          Off while EDITING: the far end of the park is where you place things
+          from, and a haze over it hides the row you are aiming at. */}
+      {!editing && <fog attach="fog" args={[fog, FOG_NEAR, FOG_FAR]} />}
 
       {/* the ambient gradient: cool sky above, warm peach bounce off the plaza
           below, so an underside never reads the same as a face */}
-      <hemisphereLight args={[LIGHT.hemiSky, LIGHT.hemiGround, HEMI_INTENSITY]} />
+      <hemisphereLight args={[tod.hemiSky ?? LIGHT.hemiSky, tod.hemiGround ?? LIGHT.hemiGround, HEMI_INTENSITY * ambK]} />
       {/* the only cool light that reaches geometry the key cannot see, hence
           more saturated than the dome it sits inside */}
-      <directionalLight position={fillPos} intensity={FILL_INTENSITY} color={LIGHT.fillColor} />
+      <directionalLight position={fillPos} intensity={FILL_INTENSITY * ambK} color={tod.fill ?? LIGHT.fillColor} />
 
       <object3D ref={target} />
       {/* left/right/top/bottom are fitted per frame above, so they are absent here */}
       <directionalLight
         ref={key}
-        intensity={KEY_INTENSITY}
-        color={LIGHT.keyColor}
+        intensity={KEY_INTENSITY * keyK}
+        color={tod.key ?? LIGHT.keyColor}
         castShadow
         // 3072 rather than 2048: with the box fitted to the visible ground a
         // plaza frame spans ~70 units, and at 2048 that is 34mm of world per
         // texel — coarser than a skateboard is thick, which is why bench legs
         // and the rider's shadow were dissolving before they reached the slab.
-        shadow-mapSize={TOUCH ? [1024, 1024] : quality === 'low' ? [1536, 1536] : [3072, 3072]}
+        shadow-mapSize={editing ? [1024, 1024] : TOUCH ? [1024, 1024] : quality === 'low' ? [1536, 1536] : [3072, 3072]}
         // Under PCF this is the Vogel disk radius in TEXELS, not a blur kernel.
         // It is a noise budget as much as a softness one: three spends exactly
         // five Vogel taps and rotates the pattern per pixel by interleaved
@@ -422,8 +440,10 @@ export default function Lighting() {
           This is where the broad low-contrast specular that makes every surface
           read as physical comes from, so its colours have to obey the same
           key/sky split as the analytic lights. */}
-      <Environment resolution={128} frames={1} environmentIntensity={ENV_INTENSITY}>
-        <color attach="background" args={[C.skyHigh]} />
+      {/* key={tod.id}: frames={1} bakes once per mount, so a time-of-day
+          change has to remount the probe or the dome keeps the old sky */}
+      <Environment key={tod.id} resolution={128} frames={1} environmentIntensity={ENV_INTENSITY * ambK * envK}>
+        <color attach="background" args={[skyHigh]} />
         {/* Sun card — the one hot spot a glancing surface can catch. Its
             position is SUN * 11, so the env highlight and the cast shadows agree
             about where the sun is. Bright but small on purpose: a small solid
@@ -442,7 +462,7 @@ export default function Lighting() {
             modulation the bowl interior had. At 6.5 units and 0.34 it is a soft
             elongated glint the curvature can sweep, and the bowl's shape is
             once again drawn by the key's terminator rather than by one hotspot. */}
-        <Lightformer form="circle" intensity={0.16} color={LIGHT.keyColor} position={[6.7, 6.5, -5.8]} scale={[8, 8, 1]} />
+        <Lightformer form="circle" intensity={0.16 * keyK} color={tod.key ?? LIGHT.keyColor} position={[6.7, 6.5, -5.8]} scale={[8, 8, 1]} />
         {/* The warm half of the sky — MOVED, not merely dimmed. It used to face
             straight down from the zenith, which meant it was the largest single
             contributor to the irradiance every horizontal surface integrates:
@@ -454,7 +474,7 @@ export default function Lighting() {
             shadow's hue is now set by the cool dome and the peach bounce alone. */}
         <Lightformer
           intensity={0.55}
-          color={LIGHT.envWarm}
+          color={tod.envWarm ?? LIGHT.envWarm}
           position={[8, 3.5, -7]}
           scale={[16, 9, 1]}
         />
@@ -468,7 +488,7 @@ export default function Lighting() {
             never render as three copies of one value. */}
         <Lightformer
           intensity={0.9}
-          color={LIGHT.envColor}
+          color={tod.envZenith ?? LIGHT.envColor}
           position={[0, 9, 0]}
           rotation-x={Math.PI / 2}
           scale={[24, 24, 1]}
@@ -476,7 +496,7 @@ export default function Lighting() {
         {/* The cold half, opposite the key — the one part of the ambient that
             goes UP while everything else comes down, because blue is the only
             channel already landing on the reference. */}
-        <Lightformer intensity={1.7} color={LIGHT.fillColor} position={[-8, 2, 6]} scale={[11, 7, 1]} />
+        <Lightformer intensity={1.7} color={tod.envFill ?? LIGHT.fillColor} position={[-8, 2, 6]} scale={[11, 7, 1]} />
         {/* Peach light coming back UP off the plaza: without it every underside
             and every downward-facing bevel reflects the cool dome and goes grey.
             It is the one card that goes UP as the dome comes down — the whole
@@ -485,7 +505,7 @@ export default function Lighting() {
             lift along stair risers and wall bases the reference has. */}
         <Lightformer
           intensity={0.55}
-          color={C.bounce}
+          color={tod.bounce ?? C.bounce}
           position={[0, -6, 0]}
           rotation-x={-Math.PI / 2}
           scale={[26, 26, 1]}

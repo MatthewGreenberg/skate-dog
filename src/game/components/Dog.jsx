@@ -20,7 +20,7 @@ import { KTX2Loader } from 'three-stdlib'
 import * as THREE from 'three'
 import { P } from '../store.js'
 import { captureRest, setBone, eulerDelta } from '../player/boneRig.js'
-import { SIZE, LEG, LEG_DROP, TARGET_LENGTH } from './dogFit.js'
+import { LEG, LEG_DROP, TARGET_LENGTH } from './dogFit.js'
 import { dogNormal, dogRough } from '../level/textures.js'
 
 const URL = '/dog_compressed.glb'
@@ -147,7 +147,7 @@ const GRABS = {
 // an ear flaps about X and the tail wags about Y.
 const swingZ = (bone, a) => setBone(bone, eulerDelta(_d, 0, 0, a))
 
-export default function Dog() {
+export default function Dog({ dogSize, boySize, long, tall }) {
   const root = useRef()
   const gl = useThree((s) => s.gl)
 
@@ -214,7 +214,8 @@ export default function Dog() {
   // Bind-pose bounds -> the fit scale, and the floor the drop is measured from.
   // Height is squashed and length stretched about that fit; the shortened legs
   // lift the paws off the bind-pose floor, so the model drops by LEG_DROP too.
-  // The drop itself scales with SIZE.tall, so it is applied in the frame loop.
+  // The drop itself scales with the live dog size/tall fit, so it is applied in
+  // the frame loop. That keeps the paws at y=0 at every editor setting.
   const { scale, minY } = useMemo(() => {
     _box.setFromObject(scene)
     _box.getSize(_size)
@@ -235,7 +236,7 @@ export default function Dog() {
   // bone's non-identity rest orientation and its HEAD scale are compensated for
   // rather than having to be typed in (see boneRig.js for why a bone's rest
   // frame is never identity). Everything above `fit` cancels out of that
-  // relative transform, so the live SIZE scale does not need to be applied
+  // relative transform, so the live character scale does not need to be applied
   // first — but the local matrices do have to be current.
   useLayoutEffect(() => {
     const m = mouth.current
@@ -248,10 +249,15 @@ export default function Dog() {
   useFrame((_, delta) => {
     if (!root.current) return
 
-    // Live fit: the sliders in Player.jsx move SIZE, and the paws have to stay
-    // on y=0 through it, so the drop is re-derived rather than baked.
-    fit.current.scale.set(scale * SIZE.long, scale * SIZE.tall, scale)
-    fit.current.position.y = -(minY + LEG_DROP) * scale * SIZE.tall
+    // Live fit: the level editor supplies reactive scale props, and the paws
+    // have to stay on y=0 through them, so the drop is re-derived rather than
+    // baked.
+    fit.current.scale.set(
+      scale * long * dogSize,
+      scale * tall * dogSize,
+      scale * dogSize,
+    )
+    fit.current.position.y = -(minY + LEG_DROP) * scale * tall * dogSize
     const dt = Math.min(delta, 1 / 30)
     const s = a.current
     const spd = Math.min(P.speed / 12, 1)
@@ -294,12 +300,16 @@ export default function Dog() {
     // grab: the dog is pulled toward the reaching hand — connection over
     // separation, one unit in the air. Which way depends on the rolled style.
     const gb = GRABS[P.grabStyle] || GRABS.nose
+    // These translations used to inherit Player's shared 1.58 scale. Dog and
+    // boy now size independently, so dog-only motion follows the dog while the
+    // grab reach uses their mean — the connection point belongs to the pair.
+    const unitScale = (dogSize + boySize) * 0.5
     r.rotation.x = P.dogPitch + P.grab * gb.pitch
     r.rotation.y = Math.sin(P.run) * 0.05 * cycle + wob * 0.25
     r.rotation.z =
       P.dogRoll + P.lean * 0.22 + Math.sin(P.run) * 0.035 * cycle + P.grab * gb.roll + wob
-    r.position.x = P.grab * gb.x
-    r.position.y = bob - P.crouch * 0.06 + P.grab * gb.y
+    r.position.x = P.grab * gb.x * unitScale
+    r.position.y = (bob - P.crouch * 0.06) * dogSize + P.grab * gb.y * unitScale
     // squash and stretch, volume-ish: the gait pumps it too, so the body is
     // never rigid while it is moving.
     const pump = Math.sin(P.run * 2) * 0.055 * cycle
@@ -364,7 +374,7 @@ export default function Dog() {
     // hips, and `lag` whips it on a reversal, the same signal the ears and
     // tail trail on. Up is +Y in model space, so a turn is a yaw; the sign
     // matches the skull's below, which already leads the carve.
-    // SIZE.long stretches x OUTSIDE these bones, which flattens the apparent
+    // The long fit stretches x OUTSIDE these bones, which flattens the apparent
     // angle of a yaw (nose lands at (long*cos, sin)) — so a longer dog needs a
     // bigger number for the same read: 0.34 raw is ~35deg on screen at 1.16.
     const bend = -(P.lean * 0.34 + lag * 0.2)

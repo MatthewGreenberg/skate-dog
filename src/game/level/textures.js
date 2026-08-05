@@ -330,6 +330,148 @@ export function plazaRough() {
   })
 }
 
+// ------------------------------------------------- editor floor patterns
+// The editor's Scenery card can swap the plaza's PATTERN, not just its tint.
+// 'slabs' (the shipped map) falls through to plazaMap()/plazaNormal() above so
+// a plain visit and the shoot harness stay byte-identical; the variants below
+// are drawn only when picked, and cached per id like everything else here.
+// Params: grid (nx x ny), `bond` = odd-row offset as a fraction of cell width
+// (running bond needs ny EVEN or the texture's vertical wrap breaks parity),
+// `checker` = alternate cells drop to the ramp's dark end, `flat` = no cells
+// at all (poured concrete — cracks stand in for joints), `wood` = colour off
+// RAMP.wood instead of RAMP.plaza, dark gap, grain streaks along the plank.
+const PLAZA_PATTERNS = {
+  tiles: { nx: 10, ny: 10, bond: 0, checker: 0, lo: 0.22, span: 0.72, gapDiv: 25 },
+  brick: { nx: 4, ny: 10, bond: 0.5, checker: 0, lo: 0.16, span: 0.78, gapDiv: 28 },
+  checker: { nx: 8, ny: 8, bond: 0, checker: 1, gapDiv: 30 },
+  concrete: { flat: true },
+  // 2.67m x 0.31m boards, half-bond butt joints — a boardwalk, not parquet
+  wood: { nx: 3, ny: 26, bond: 0.5, checker: 0, wood: true, gapDiv: 12 },
+}
+
+// Bond walk. Odd rows start at -1 so the offset row's left edge is covered;
+// the right overhang clips, and the half-cell it clipped is what the i=-1 cell
+// draws on the next wrap — colours come off the WRAPPED index so both halves
+// of a seam-straddling paver agree.
+function paverWalkB(S, p, fn) {
+  const cw = S / p.nx
+  const ch = S / p.ny
+  for (let j = 0; j < p.ny; j++) {
+    const off = (j % 2) * p.bond * cw
+    for (let i = -1; i < p.nx; i++) fn(i * cw + off, j * ch, cw, ch, (i + p.nx) % p.nx, j)
+  }
+}
+
+export function plazaMapFor(id) {
+  const p = PLAZA_PATTERNS[id]
+  if (!p) return plazaMap()
+  return cached('plaza:' + id, () => {
+    const S = 2048
+    const [c, x] = canvas(S, S)
+    x.fillStyle = p.wood ? '#4a382c' : p.flat ? C.plaza : mix(C.plaza, C.plazaGrout, 0.55)
+    x.fillRect(0, 0, S, S)
+    if (!p.flat) {
+      const stops = p.wood ? RAMP.wood : RAMP.plaza
+      const gap = Math.max(2, S / p.ny / (p.gapDiv ?? 42))
+      paverWalkB(S, p, (px, py, cw, ch, i, j) => {
+        const t = rnd(i, j, 3) * 0.85 + rnd(i, j, 17) * 0.15
+        // checker folds alternate cells to the ramp's dark end; the per-cell
+        // ramp jitter stays so the dark squares are still a batch, not a fill
+        const lo = p.checker && (i + j) % 2 ? 0.04 : p.wood ? 0.12 : (p.lo ?? 0.5)
+        const span = p.wood ? 0.82 : (p.span ?? 0.42)
+        x.fillStyle = rampAt(stops, lo + t * span)
+        x.fillRect(px + gap, py + gap, cw - gap * 2, ch - gap * 2)
+        if (p.wood) {
+          // grain streaks running the length of the board — the thing that
+          // says wood instead of a brown tile
+          x.strokeStyle = 'rgba(90,62,42,0.22)'
+          x.lineWidth = 1.5
+          for (let k = 0; k < 3; k++) {
+            const sy = py + gap + (0.15 + rnd(i, j, 29 + k) * 0.7) * (ch - gap * 2)
+            x.beginPath()
+            x.moveTo(px + gap, sy)
+            x.lineTo(px + cw - gap, sy + (rnd(i, j, 33 + k) - 0.5) * ch * 0.2)
+            x.stroke()
+          }
+        } else {
+          x.fillStyle = `rgba(255,255,255,${0.05 + rnd(i, j, 19) * 0.06})`
+          x.fillRect(px + gap, py + gap, cw - gap * 2, Math.max(1, ch * 0.045))
+          x.fillRect(px + gap, py + gap, Math.max(1, cw * 0.045), ch - gap * 2)
+        }
+      })
+    }
+    mottle(x, S, S, 11, 0.05, 7)
+    grain(x, S, S, 104000, 0.05, 41)
+    if (p.flat) {
+      // poured concrete has no joints, so cracks carry the whole "surface has
+      // history" read — shipped tint, a few more of them. Broad trowel arcs
+      // make it unmistakably poured at the editor's overview distance.
+      x.save()
+      x.strokeStyle = 'rgba(255,245,238,0.12)'
+      x.lineWidth = 9
+      for (let k = 0; k < 28; k++) {
+        const cx = rnd(k, 0, 91) * S
+        const cy = rnd(k, 1, 92) * S
+        const rr = S * (0.04 + rnd(k, 2, 93) * 0.12)
+        x.beginPath()
+        x.arc(cx, cy, rr, rnd(k, 3, 94) * 3, 3.4 + rnd(k, 4, 95) * 2.4)
+        x.stroke()
+      }
+      x.restore()
+      x.strokeStyle = 'rgba(150,96,80,0.20)'
+      x.lineWidth = 1.6
+      for (let k = 0; k < 14; k++) crack(x, rnd(k, 1, 21) * S, rnd(k, 2, 22) * S, 18, 34, 23 + k)
+    }
+    // same scuff pass as the shipped map — the wear is the floor's, not the
+    // pattern's. ponytail: cracks + moss skipped here (they were seeded on the
+    // 5x5 joint grid); add per-pattern if a variant floor reads too clean.
+    x.save()
+    x.lineCap = 'round'
+    for (let k = 0; k < 26; k++) {
+      x.globalAlpha = 0.05 + rnd(k, 0, 61) * 0.09
+      x.strokeStyle = rnd(k, 1, 62) > 0.75 ? '#3a3038' : '#575059'
+      x.lineWidth = 4 + rnd(k, 2, 63) * 14
+      crack(x, rnd(k, 3, 64) * S, rnd(k, 4, 65) * S, 6 + Math.floor(rnd(k, 5, 66) * 6), 10 + rnd(k, 6, 67) * 26, 71 + k)
+    }
+    x.restore()
+    return tex(c)
+  })
+}
+
+export function plazaNormalFor(id) {
+  const p = PLAZA_PATTERNS[id]
+  if (!p) return plazaNormal()
+  return cached('plazaN:' + id, () => {
+    const S = 1024
+    const [c, x] = canvas(S, S)
+    x.fillStyle = '#000'
+    x.fillRect(0, 0, S, S)
+    if (!p.flat) {
+      const gap = Math.max(1, S / p.ny / 16)
+      paverWalkB(S, p, (px, py, cw, ch) => {
+        const g = x.createLinearGradient(px, py, px, py + ch)
+        g.addColorStop(0, '#e6e6e6')
+        g.addColorStop(0.06, '#ffffff')
+        g.addColorStop(0.94, '#ffffff')
+        g.addColorStop(1, '#e6e6e6')
+        x.fillStyle = g
+        roundRect(x, px + gap, py + gap, cw - gap * 2, ch - gap * 2, ch * 0.02)
+        x.fill()
+      })
+    } else {
+      // no joints — the grain below is the whole relief, a near-flat trowelled
+      // slab rather than a black (fully recessed) one
+      x.fillStyle = '#f2f2f2'
+      x.fillRect(0, 0, S, S)
+    }
+    grain(x, S, S, 36000, 0.10, 43)
+    return normalFrom(c, 0.55)
+  })
+}
+// ponytail: all patterns share plazaRough() — the joints there are the 5x5
+// grid, but roughness joints are near-invisible at play distance. Give the
+// variants their own rough map only if a capture shows the seams sweeping wrong.
+
 // -------------------------------------------------------------- floor decals
 // The plaza map tiles every 8 m, so anything baked INTO it repeats ~120 times
 // across the park and reads as wallpaper the moment you notice one copy. These
@@ -1661,8 +1803,18 @@ export function dogRough() {
   })
 }
 
+// The one map that is NOT cached forever: the editor moves the props it bakes,
+// and a stale AO leaves contact shadows on the plaza under nothing. Rebuilt on
+// demand (one 1024 canvas), and the old texture is disposed or every commit
+// leaks one to the GPU.
+let _parkAO = null
+export function invalidateParkAO() {
+  _parkAO?.dispose()
+  _parkAO = null
+}
 export function parkAOMap(rects) {
-  return cached('parkAO', () => {
+  if (_parkAO) return _parkAO
+  return (_parkAO = (() => {
     const S = 1024
     const B = AO_BOUNDS
     const [c, x] = canvas(S, S)
@@ -1697,5 +1849,5 @@ export function parkAOMap(rects) {
     t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping
     t.anisotropy = 4
     return t
-  })
+  })())
 }

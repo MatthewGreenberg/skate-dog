@@ -7,9 +7,17 @@ import { resetPlayer } from '../player/PlayerController.js'
 import { touch, touchJumpDown, touchJumpUp, TOUCH } from '../input.js'
 import { unlockAudio, setMuted, isMuted } from '../audio/AudioManager.js'
 import { PHOTO } from '../photo.js'
+import { listLevels, deleteUserLevel } from '../level/levelEdits.js'
 import './ui.css'
 
 const NUM = new Intl.NumberFormat('en-US')
+
+// playing a saved level (`?level=<id>`) — going home is a full navigation on
+// purpose, since the shipped park only loads at module import
+const ON_USER_LEVEL = new URLSearchParams(location.search).has('level')
+
+// Has the loading screen ever finished this page-load? See the useState below.
+let everLoaded = false
 
 function BoneIcon() {
   // two round lobes at each end joined by a thick bar
@@ -231,6 +239,10 @@ function GoalMenu() {
                 <MuteWave />
               </div>
             )}
+            <div className="hud-sheet-audio">
+              <span>EXIT RUN</span>
+              <button className="hud-sheet-home" onClick={() => { location.href = '/' }}>HOME</button>
+            </div>
             <div className="hud-sheet-foot">PAUSED — tap anywhere to resume</div>
           </div>
         </div>
@@ -415,10 +427,17 @@ function StarIcon({ className }) {
 // The two glb rigs are ~9MB compressed and every texture in the park is painted
 // into a canvas at load, so there IS a wait to fill. Progress comes off three's
 // DefaultLoadingManager via drei.
-function LoadingScreen({ progress }) {
+export function LoadingScreen({ progress, editor = false }) {
   const pct = Math.round(progress)
-  const phase =
-    pct >= 100
+  const phase = editor
+    ? pct >= 100
+      ? 'Finishing the editor viewport…'
+      : pct > 66
+        ? 'Setting out your tools…'
+        : pct > 32
+          ? 'Laying out the obstacles…'
+          : 'Waking up the skatepark…'
+    : pct >= 100
       ? 'Ready to roll!'
       : pct > 66
         ? 'Hiding the bonus bones…'
@@ -431,14 +450,14 @@ function LoadingScreen({ progress }) {
       className="hud-load hud-load-paw-screen"
       role="status"
       aria-live="polite"
-      aria-label={`Loading Skate Dog, ${pct} percent`}
+      aria-label={`Loading ${editor ? 'level editor' : 'Skate Dog'}, ${pct} percent`}
       style={{
         '--load': pct,
         '--load-ratio': Math.max(0.015, pct / 100),
         '--load-shine-offset': `${80 - pct * 2.1}px`,
       }}
     >
-      <span className="hud-load-paw-kicker">SKATE DOG</span>
+      <span className="hud-load-paw-kicker">{editor ? 'LEVEL EDITOR' : 'SKATE DOG'}</span>
       <div className="hud-load-paw-meter" aria-hidden="true">
         <svg className="hud-load-paw" viewBox="0 0 220 210">
           <defs>
@@ -488,6 +507,8 @@ function StartOverlay() {
   // the title for the same half of the frame, and the count is the only part you
   // read before you've played once.
   const [showGoals, setShowGoals] = useState(false)
+  const [showLevels, setShowLevels] = useState(false)
+  const [levels, setLevels] = useState(listLevels)
   const goalsDone = useGame((s) => s.goalsDone)
   const onPlay = () => {
     if (out) return
@@ -498,6 +519,8 @@ function StartOverlay() {
   useEffect(() => {
     const key = (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
+        // a focused LEVEL BUILDER / MY LEVELS control keeps its own activation
+        if (e.target.closest?.('.hud-doors, .hud-levels')) return
         e.preventDefault()
         onPlay()
       }
@@ -531,6 +554,46 @@ function StartOverlay() {
         <StarIcon className="hud-play-star" />
       </button>
       <span className="hud-hint">or press Enter</span>
+      {/* full navigation on purpose: EDIT is a module-load const and
+          loadLevel/setMusicDuck only run at import under /edit */}
+      <div className="hud-doors">
+        <button className="hud-build" onClick={() => { location.href = '/edit' }}>
+          🛠️ LEVEL BUILDER
+        </button>
+        {ON_USER_LEVEL && (
+          <button className="hud-build" onClick={() => { location.href = '/' }}>
+            HOME
+          </button>
+        )}
+        {levels.length > 0 && (
+          <button className="hud-build" onClick={() => setShowLevels((v) => !v)}>
+            🏞️ MY LEVELS ({levels.length})
+          </button>
+        )}
+      </div>
+      {showLevels && (
+        <div className="hud-levels">
+          {levels.map((l) => (
+            <div key={l.id} className="hud-level">
+              {/* ?level= applies the saved blob at module load, so playing one
+                  is a full navigation for the same reason the builder is */}
+              <button className="hud-level-go" onClick={() => { location.href = '/?level=' + l.id }}>
+                {l.thumb ? <img src={l.thumb} alt="" /> : <span className="hud-level-blank">🛹</span>}
+                <b>{l.name}</b>
+              </button>
+              <button
+                className="hud-level-x"
+                title="Delete level"
+                onClick={() => {
+                  if (!window.confirm(`Delete "${l.name}"?`)) return
+                  deleteUserLevel(l.id)
+                  setLevels(listLevels())
+                }}
+              >✕</button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="hud-legend">
         {LEGEND.map(([key, what]) => (
           <div key={key}>
@@ -600,7 +663,11 @@ export default function GameUI() {
   // Latched, not live: the manager reports active=false between items, and a
   // loader that blinks off mid-load is worse than no loader. Once 100 lands it
   // never comes back — nothing in the park loads after the start card.
-  const [loaded, setLoaded] = useState(false)
+  // Seeded from a MODULE-scope latch, not `false`: GameUI now unmounts and
+  // remounts every time the level editor toggles into a playtest, and component
+  // state would put the bone-chase bar back on screen for its full 400ms on
+  // every single Play press. Nothing reloads between those mounts.
+  const [loaded, setLoaded] = useState(everLoaded)
   // ponytail: hard 8s escape hatch. A manager that never reports 100 (nothing
   // left to load by the time this mounts, a failed fetch) would otherwise leave
   // the page on the loading screen with no way into the game. It bypasses only
@@ -612,7 +679,7 @@ export default function GameUI() {
   }, [])
   useEffect(() => {
     if ((progress < 100 && !assetsTimedOut) || !warmedUp) return
-    const t = setTimeout(() => setLoaded(true), 400) // let the bar finish filling
+    const t = setTimeout(() => { everLoaded = true; setLoaded(true) }, 400) // let the bar finish filling
     return () => clearTimeout(t)
   }, [progress, assetsTimedOut, warmedUp])
   // photo mode shows the in-play HUD with a representative score, never the

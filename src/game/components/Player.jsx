@@ -6,7 +6,8 @@ import { P } from '../store.js'
 import Dog from './Dog.jsx'
 import Rider from './Rider.jsx'
 import { applyClearCoat } from './clearCoat.js'
-import { SIZE } from './dogFit.js'
+import { useCharacterSize, setDogProportions } from './dogFit.js'
+import { useEditing, useEditor } from '../level/levelEdits.js'
 
 const UP_Y = new THREE.Vector3(0, 1, 0)
 const faceQ = new THREE.Quaternion()
@@ -17,6 +18,20 @@ const faceQ = new THREE.Quaternion()
 export default function Player() {
   const root = useRef()
   const riderRoot = useRef()
+  const dogSize = useCharacterSize((s) => s.dog)
+  const boySize = useCharacterSize((s) => s.boy)
+  const dogLong = useCharacterSize((s) => s.long)
+  const dogTall = useCharacterSize((s) => s.tall)
+  const editing = useEditing()
+  const characterSelected = useEditor((s) => s.specialSel === 'character')
+
+  const pickCharacter = (e) => {
+    const editor = useEditor.getState()
+    // Let an armed placement click continue through to the ground plane.
+    if (!editing || editor.add) return
+    e.stopPropagation()
+    editor.selectSpecial('character')
+  }
 
   // The coat is the RIDER's only — a coated dog reads as wet plastic, not fur.
   // Driven from here rather than from Rider so the leva folder sits with the
@@ -30,19 +45,15 @@ export default function Player() {
     if (riderRoot.current) applyClearCoat(riderRoot.current, clearcoat, roughness)
   }, [clearcoat, roughness])
 
-  // Dog size. `size` is this group's scale, so it carries the rider with it —
-  // the two are one unit and a dog that grows out from under its rider is not a
-  // size control. long/tall skew the dog's own fit; they go into Dog's mutable
-  // SIZE rather than down as props because Dog and Rider both consume them in
-  // the frame loop (the rider's feet ride backY(), which tall moves).
-  const { size, long, tall } = useControls('Dog size', {
-    size: { value: 1.58, min: 0.6, max: 3, step: 0.01 },
-    long: { value: SIZE.long, min: 0.8, max: 2.4, step: 0.01 },
-    tall: { value: SIZE.tall, min: 0.5, max: 1.6, step: 0.01 },
+  // The level editor is the sole owner of uniform character size. Debug keeps
+  // only the dog-specific proportion controls, so it cannot write stale scale
+  // values back over an editor change.
+  const { long, tall } = useControls('Dog proportions', {
+    long: { value: dogLong, min: 0.8, max: 2.4, step: 0.01 },
+    tall: { value: dogTall, min: 0.5, max: 1.6, step: 0.01 },
   })
   useEffect(() => {
-    SIZE.long = long
-    SIZE.tall = tall
+    setDogProportions(long, tall)
   }, [long, tall])
 
   useFrame((state) => {
@@ -69,10 +80,16 @@ export default function Player() {
     }
   })
   return (
-    <group ref={root} scale={size}>
-      <Dog />
+    <group ref={root} onPointerDown={editing ? pickCharacter : undefined}>
+      {editing && characterSelected && (
+        <mesh position={[0, 0.025, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+          <ringGeometry args={[0.95, 1.2, 32]} />
+          <meshBasicMaterial color="#ffe066" transparent opacity={0.82} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      <Dog dogSize={dogSize} boySize={boySize} long={dogLong} tall={dogTall} />
       <group ref={riderRoot}>
-        <Rider />
+        <Rider dogSize={dogSize} boySize={boySize} dogTall={dogTall} />
       </group>
     </group>
   )

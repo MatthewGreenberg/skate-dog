@@ -18,6 +18,17 @@ let whiteBuf = null, pinkBuf = null, loopEnd = 0
 let breezeLP = null, breezeGain = null, rollBP = null, rollGain = null
 let grindBP = null, grindLevel = null, grindGain = null
 let music = null, musicIdx = 0, musicOrder = null
+// Ducking factor, not a second volume: the mute path and the editor's duck are
+// two independent reasons the music is quiet, and one variable for both means
+// unmuting while editing comes back at full level.
+let musicDuck = 1
+const musicVol = () => (muted ? 0 : MUSIC_VOL * musicDuck)
+
+/** Scale the soundtrack without touching mute. 1 = normal. */
+export function setMusicDuck(k) {
+  musicDuck = k
+  if (music) music.volume = musicVol()
+}
 const loops = [], unsubs = []
 let breezePhase = 0, birdTimer = 4, lastHalf = 0
 
@@ -40,7 +51,7 @@ function shuffleMusic() {
 function playMusicTrack() {
   if (!music || !musicOrder) return
   music.src = musicOrder[musicIdx]
-  music.volume = muted ? 0 : MUSIC_VOL
+  music.volume = musicVol()
   music.play().catch(() => { /* gesture / autoplay policy */ })
 }
 
@@ -330,6 +341,47 @@ function chirp() {
   }
 }
 
+// ------------------------------------------------------------------ editor
+// Placement pop / delete thunk for ?edit build mode. They self-unlock: the
+// editor never runs the game's start gesture, and a placement IS a click, so
+// creating the context here is the gesture. Guarded for node — the level
+// checks import levelEdits, which imports this module.
+export function sfxPlace(h = 1) {
+  if (typeof window === 'undefined') return
+  unlockAudio()
+  if (!ctx) return
+  const t = ctx.currentTime, v = voice(0.3)
+  // taller object -> deeper pop, so a quarter lands heavier than a bone
+  const hz = 640 / Math.pow(Math.max(0.4, h), 0.35)
+  const o = osc('sine', hz)
+  o.frequency.setValueAtTime(hz, t)
+  o.frequency.exponentialRampToValueAtTime(hz * 0.45, t + 0.11)
+  env(v.g.gain, t, 0.3, 0.008, 0.16)
+  o.connect(v.g); o.start(t); o.stop(t + 0.2)
+  const s = noise(false, false), f = flt('highpass', 2400), ng = gn(0)
+  env(ng.gain, t, 0.05, 0.004, 0.05)
+  s.connect(f); f.connect(ng); ng.connect(v.g)
+  s.start(t, Math.random() * 2); s.stop(t + 0.08)
+  v.add(o, s, f, ng)
+}
+
+export function sfxDelete() {
+  if (typeof window === 'undefined') return
+  unlockAudio()
+  if (!ctx) return
+  const t = ctx.currentTime, v = voice(0.35)
+  const o = osc('triangle', 180)
+  o.frequency.setValueAtTime(180, t)
+  o.frequency.exponentialRampToValueAtTime(70, t + 0.16)
+  env(v.g.gain, t, 0.24, 0.006, 0.2)
+  o.connect(v.g); o.start(t); o.stop(t + 0.26)
+  const s = noise(true, false), f = flt('lowpass', 700), ng = gn(0)
+  env(ng.gain, t, 0.1, 0.005, 0.1)
+  s.connect(f); f.connect(ng); ng.connect(v.g)
+  s.start(t, Math.random() * 2); s.stop(t + 0.16)
+  v.add(o, s, f, ng)
+}
+
 // ------------------------------------------------------------------- public
 export function unlockAudio() {
   if (!ctx) {
@@ -446,7 +498,7 @@ export function updateAudio(dt) {
 export function setMuted(m) {
   muted = !!m
   if (ctx) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.03)
-  if (music) music.volume = muted ? 0 : MUSIC_VOL
+  if (music) music.volume = musicVol()
 }
 
 export function isMuted() { return muted }

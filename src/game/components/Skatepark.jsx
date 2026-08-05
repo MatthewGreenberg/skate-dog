@@ -11,7 +11,9 @@ import { buildPlazaGeometry, buildGrassGeometry, buildRampGeometry } from '../le
 import { buildDecalGeometry } from '../level/decals.js'
 import {
   plazaMap,
+  plazaMapFor,
   plazaNormal,
+  plazaNormalFor,
   plazaRough,
   masonryMap,
   masonryNormal,
@@ -33,6 +35,32 @@ import {
   MASONRY_TILE_Y,
 } from '../level/textures.js'
 import { Trees, Shrubs, Planters, Benches, LampPosts, Wind, getMuralTexture } from './Props.jsx'
+import { useSceneSettings, groundOf, patternOf } from '../level/levelEdits.js'
+
+// Live hue rotation for the masonry map. A material colour multiply cannot
+// turn purple brick into teal or gold—it can only remove channels—so the hue
+// control belongs after map sampling in the shader. The uniform object is
+// stable: changing it updates every masonry mesh without recompiling.
+const BRICK_HUE = { value: 0 }
+const brickHueShader = (shader) => {
+  shader.uniforms.brickHue = BRICK_HUE
+  shader.fragmentShader = shader.fragmentShader
+    .replace(
+      'void main() {',
+      `uniform float brickHue;
+      vec3 rotateBrickHue(vec3 c, float a) {
+        const vec3 axis = vec3(0.57735);
+        float cs = cos(a);
+        return c * cs + cross(axis, c) * sin(a) + axis * dot(axis, c) * (1.0 - cs);
+      }
+      void main() {`,
+    )
+    .replace(
+      '#include <map_fragment>',
+      `#include <map_fragment>
+      diffuseColor.rgb = max(vec3(0.0), rotateBrickHue(diffuseColor.rgb, brickHue));`,
+    )
+}
 
 // ---------------------------------------------------------------- materials
 // Every surface now carries a normal map AND a roughness map. That pairing is
@@ -146,7 +174,11 @@ function mats() {
     railTeal: std({ color: C.railTeal, ...M.rail, envMapIntensity: 1.5 }),
     railPink: std({ color: C.railPink, ...M.rail, envMapIntensity: 1.5 }),
     railYellow: std({ color: C.railYellow, ...M.rail, envMapIntensity: 1.5 }),
+    // editor-pickable fourth enamel; the benches already wear C.railMint
+    railMint: std({ color: C.railMint, ...M.rail, envMapIntensity: 1.5 }),
   }
+  _mats.masonry.onBeforeCompile = brickHueShader
+  _mats.masonry.customProgramCacheKey = () => 'masonry-brick-hue-v1'
   return _mats
 }
 
@@ -237,6 +269,41 @@ function Plaza() {
   const geo = useMemo(() => buildPlazaGeometry(), [])
   const grass = useMemo(() => buildGrassGeometry(), [])
   const m = mats()
+  const ground = useSceneSettings((s) => s.ground)
+  const pattern = useSceneSettings((s) => s.pattern)
+  const brickHue = useSceneSettings((s) => s.brickHue)
+  // The editor's ground look: tint multiplies the plaza albedo, and the
+  // PATTERN swaps the albedo/normal pair wholesale (plazaMapFor returns the
+  // shipped cached maps for 'slabs', so a plain visit mounts the exact same
+  // textures). Both plaza materials, or the deck insets (m.plaza) would keep
+  // the old floor. Applied on mount: mats() is module-cached and Skatepark
+  // The plaza subscribes directly to scene settings. No needsUpdate — both
+  // slots are always occupied, so a texture swap changes no shader defines.
+  useLayoutEffect(() => {
+    const theme = groundOf(ground)
+    const finish = patternOf(pattern)
+    const map = plazaMapFor(finish.id)
+    const nrm = plazaNormalFor(finish.id)
+    for (const mm of [m.plaza, m.plazaGround]) {
+      mm.color.set(theme.tint)
+      mm.map = map
+      mm.normalMap = nrm
+      mm.normalScale.setScalar(finish.bump)
+      mm.roughness = finish.rough
+      mm.envMapIntensity = finish.env
+    }
+    // Colour is a park palette, not one isolated floor multiply. Texture maps
+    // keep each material's detail; these multipliers pull the major masses into
+    // one family while rails/props retain their authored accent colours.
+    const surface = theme.surface
+    m.stone.color.set(surface.stone ?? '#ffffff')
+    m.masonry.color.set(surface.masonry ?? '#ffffff')
+    m.bowl.color.set(surface.bowl ?? '#ffffff')
+    m.hpSurf.color.set(surface.hpSurf ?? '#ffffff')
+    m.wood.color.set(surface.wood ?? '#ffffff')
+    m.grass.color.set(surface.grass ?? '#ffffff')
+    BRICK_HUE.value = brickHue * THREE.MathUtils.DEG2RAD
+  }, [ground, pattern, brickHue, m])
   return (
     <>
       <mesh geometry={geo} receiveShadow material={m.plazaGround} />
@@ -518,6 +585,17 @@ function Rail({ r }) {
 // ---------------------------------------------------------------- park
 export default function Skatepark() {
   const root = useRef()
+
+  // mats() is module-cached, so the plaza material outlives this remount and
+  // would keep the AO baked from whatever the level looked like at first mount
+  // — contact shadows under props you have since moved or deleted. bumpLevel()
+  // drops the texture and the footprints; this re-bakes on the remount that
+  // same bump triggers. needsUpdate because aoMap presence is a shader define.
+  useLayoutEffect(() => {
+    const m = mats().plazaGround
+    m.aoMap = parkAOMap(AO_FOOTPRINTS)
+    m.needsUpdate = true
+  })
   const boxes = SOLIDS.filter((s) => s.kind === 'box')
   const ramps = SOLIDS.filter((s) => s.kind === 'ramp')
   const stairs = SOLIDS.filter((s) => s.kind === 'stairs')
@@ -532,7 +610,12 @@ export default function Skatepark() {
   return (
     <group ref={root}>
       <Plaza />
-      <Bowl />
+      {/* BOWL.on is the editor's "delete the bowl" flag — Plaza drops its
+          cutout and sampleSurface stops reporting the dish. BowlProbe stays
+          mounted either way: it bakes the reflection the coping AND the three
+          rail materials read, and Warmup blocks on the ready signal it sets,
+          so skipping it would strand the loading screen. */}
+      {BOWL.on && <Bowl />}
       {boxes.map((s) =>
         s.style === 'solid' ? <SolidSlab key={s.id} s={s} /> : <Slab key={s.id} s={s} />,
       )}

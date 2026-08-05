@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { useProgress } from '@react-three/drei'
 import { EffectComposer, N8AO, Bloom, Vignette, ToneMapping } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import { useControls, folder, Leva } from 'leva'
@@ -22,16 +23,21 @@ import Letters from './Letters.jsx'
 import Cans from './Cans.jsx'
 import CameraController from './CameraController.jsx'
 import PerformanceManager from './PerformanceManager.jsx'
-import GameUI from './GameUI.jsx'
+import GameUI, { LoadingScreen } from './GameUI.jsx'
 import Intro from './Intro.jsx'
 import useToonFX from './ToonFX.jsx'
 import FoliageControls from './FoliageControls.jsx'
+import Editor from './Editor.jsx'
+import EditorPanel from './EditorPanel.jsx'
+import { EDIT, useLevelVersion, useEditing, setEditing } from '../level/levelEdits.js'
 
 // One authoritative update order per frame: input -> movement/collision/surface
 // -> tricks/grinding -> animation channels -> audio. Views read P afterwards;
 // the camera runs last because it is mounted last.
 function GameLoop() {
   const started = useGame((s) => s.started)
+  // LIVE, not the `?edit` const: P toggles you into the sim without a reload.
+  const editing = useEditing()
   useEffect(() => initInput(), [])
   useEffect(() => initGoals(), [])
   useEffect(() => {
@@ -59,6 +65,9 @@ function GameLoop() {
       tickPhotoReady()
       return
     }
+    // The editor owns the camera and the keyboard; a live sim underneath would
+    // steer the dog off W/E and fight the orbit rig for the same key presses.
+    if (editing) return
     const dt = Math.min(delta, 0.1)
     const g = useGame.getState()
     sampleInput(dt, g.runOver)
@@ -89,6 +98,34 @@ const UP = new THREE.Vector3(0, 1, 0)
 const REVEAL = 1.5
 const AO_DEBUG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('ao')
 const DEBUG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('debug')
+
+// Switching modes replaces the camera, UI, post stack, controls, and several
+// scene actors in one render. Cover that swap at the midpoint of a short,
+// labelled transition so it reads as navigation instead of a dropped frame.
+const MODE_SWAP_MS = 280
+const MODE_TRANSITION_MS = 680
+
+function ModeTransition({ transition }) {
+  if (!transition) return null
+  const toEditor = transition === 'editor'
+  return (
+    <div
+      className={`ed-mode-transition is-${transition}`}
+      role="status"
+      aria-live="assertive"
+      aria-label={toEditor ? 'Returning to the level editor' : 'Starting play-test'}
+    >
+      <div className="ed-mode-transition-card">
+        <span className="ed-mode-transition-icon" aria-hidden="true">{toEditor ? '↶' : '▶'}</span>
+        <span className="ed-mode-transition-copy">
+          <b>{toEditor ? 'Back to the editor' : 'Starting play-test'}</b>
+          <small>{toEditor ? 'Parking the run' : 'Loading your latest park'}</small>
+        </span>
+      </div>
+      <span className="ed-mode-transition-progress" aria-hidden="true" />
+    </div>
+  )
+}
 
 // Compile the static scene at the cheap tier, wait for the park's one-off bowl
 // reflection, then raise desktop quality while the loader still covers the
@@ -329,6 +366,78 @@ export default function Game() {
   // path, so restarting a run is a remount — one key on the group they share.
   const runId = useGame((s) => s.runId)
   const quality = useGame((s) => s.quality)
+  // A commit mutates levelData in place; Skatepark bakes its world matrices in
+  // a useLayoutEffect(..., []) and turns matrixWorldAutoUpdate off, so a moved
+  // row is invisible until that effect runs again. A remount IS the rebake —
+  // same trick runId plays for the collectibles.
+  const levelV = useLevelVersion()
+  const editing = useEditing()
+  const warmedUp = useGame((s) => s.warmedUp)
+  const { progress: loadProgress } = useProgress()
+  const [editorLoaded, setEditorLoaded] = useState(() => !EDIT || useGame.getState().warmedUp)
+  const [editorAssetsTimedOut, setEditorAssetsTimedOut] = useState(false)
+  const [modeTransition, setModeTransition] = useState(null)
+  const transitioning = useRef(false)
+  const modeTimers = useRef([])
+
+  useEffect(() => () => {
+    for (const timer of modeTimers.current) clearTimeout(timer)
+  }, [])
+
+  // /edit skips GameUI, which normally owns the scene loader. Keep the editor
+  // covered until both asset loading and the WebGL warm-up are complete. The
+  // timeout mirrors GameUI's escape hatch for a stalled LoadingManager, but it
+  // never bypasses renderer warm-up.
+  useEffect(() => {
+    if (!EDIT || editorLoaded) return
+    const timer = setTimeout(() => setEditorAssetsTimedOut(true), 8000)
+    return () => clearTimeout(timer)
+  }, [editorLoaded])
+  useEffect(() => {
+    if (!EDIT || editorLoaded || !warmedUp) return
+    if (loadProgress < 100 && !editorAssetsTimedOut) return
+    const timer = setTimeout(() => setEditorLoaded(true), 400)
+    return () => clearTimeout(timer)
+  }, [editorAssetsTimedOut, editorLoaded, loadProgress, warmedUp])
+
+  const changeMode = useCallback((toEditor) => {
+    if (transitioning.current) return
+    transitioning.current = true
+    setModeTransition(toEditor ? 'editor' : 'play')
+
+    modeTimers.current = [
+      setTimeout(() => setEditing(toEditor), MODE_SWAP_MS),
+      setTimeout(() => {
+        setModeTransition(null)
+        transitioning.current = false
+        modeTimers.current = []
+      }, MODE_TRANSITION_MS),
+    ]
+  }, [])
+
+  // P plays the level you just built; Esc comes back. Capture phase with
+  // stopPropagation because GameUI has its own window-level Esc (the challenge
+  // sheet) and it must not also fire on the way out of a playtest. Editor.jsx's
+  // Esc-deselects only exists while editing, which this handler ignores.
+  useEffect(() => {
+    if (!EDIT) return
+    const onKey = (e) => {
+      const t = e.target
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (!editing && e.key === 'Escape') {
+        // GoalMenu also listens for Esc on window. This is navigation in an
+        // editor play-test, so don't briefly open its sheet under the cover.
+        e.stopImmediatePropagation()
+        changeMode(true)
+      } else if (editing && (e.key === 'p' || e.key === 'P')) {
+        e.stopImmediatePropagation()
+        changeMode(false)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [editing, changeMode])
+
   return (
     <>
       <Leva hidden={!DEBUG} />
@@ -362,7 +471,10 @@ export default function Game() {
         // 6" screen hides the upscale softness the cap costs a desktop display
         // (floor 0.75 on touch gives AdaptiveDpr real room to shed pixels
         // under load; steady-state still renders at the 1.5 cap)
-        dpr={TOUCH ? [0.75, 1.5] : quality === 'low' ? 1 : [1, 2]}
+        // The editor is an orbiting work view, not the final camera. Rendering
+        // it at retina 2x quadruples fragment work while N8AO/shadows are also
+        // live, for no editing benefit. Play mode keeps the signed-off tiers.
+        dpr={editing ? 1.25 : TOUCH ? [0.75, 1.5] : quality === 'low' ? 1 : [1, 2]}
         gl={{
           // everything goes through the composer's own targets, so MSAA on the
           // default framebuffer is memory bandwidth spent on nothing
@@ -384,21 +496,36 @@ export default function Game() {
       >
         <GameLoop />
         <Lighting />
-        <Skatepark />
+        <Skatepark key={levelV} />
         <Player />
-        <group key={runId}>
+        {/* levelV joins runId here for the same reason Skatepark carries it:
+            these three read their tables at mount, so a bone added or moved in
+            the editor is invisible until the group remounts. */}
+        {/* Play-test wreckage is transient. Switching modes remounts these
+            actors from authored level data, so a smashed can never disappears
+            from the editor just because it was hit during the last run. */}
+        <group key={`${editing ? 'edit' : 'play'}:${runId}:${levelV}`}>
           <Bones />
           <Letters />
           <Cans />
         </group>
-        <Intro />
-        <Effects />
-        <PostFX />
-        <PerformanceManager />
+        {!editing && <Intro />}
+        {/* Editing needs geometry, light, and selection clarity—not gameplay
+            particle pools or the full-screen N8AO/composer. Leaving these
+            unmounted removes the editor's largest steady GPU costs. */}
+        {!editing && <Effects />}
+        {!editing && <PostFX />}
+        {!editing && <PerformanceManager />}
         <Warmup />
-        <CameraController />
+        {editing ? <Editor /> : <CameraController />}
       </Canvas>
-      <GameUI />
+      {editing ? <EditorPanel onPlay={() => changeMode(false)} /> : <GameUI />}
+      {editing && !editorLoaded && (
+        <div className="hud ed-scene-loading">
+          <LoadingScreen progress={loadProgress} editor />
+        </div>
+      )}
+      <ModeTransition transition={modeTransition} />
     </>
   )
 }

@@ -12,6 +12,8 @@ const MUSIC = [
   '/songs/Skate Dog 1.mp3',
   '/songs/Skate Dog 2.mp3',
   '/songs/Skate Dog 3.mp3',
+  '/songs/Skate Dog 4.mp3',
+  '/songs/Skate Dog 5.mp3',
 ]
 
 let ctx = null, master = null, started = false, muted = false, grinding = false

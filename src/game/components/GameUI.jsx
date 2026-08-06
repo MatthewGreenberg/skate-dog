@@ -115,9 +115,12 @@ function CanPill() {
   }, [smashed])
 
   return (
-    <div className="hud-pill hud-score hud-can-count" ref={ref}>
-      <TrashIcon />
-      <span className="hud-score-value">{smashed}/{CANS.length}</span>
+    <div className="hud-pill hud-score hud-can-count" ref={ref} aria-label={`Dog Bowling: ${smashed} of ${CANS.length} cans smashed`}>
+      <span className="hud-bowling-ball" aria-hidden="true">🎳</span>
+      <span className="hud-bowling-count-copy">
+        <small>DOG BOWLING</small>
+        <strong>{smashed}<i>/{CANS.length}</i></strong>
+      </span>
     </div>
   )
 }
@@ -158,6 +161,18 @@ function PlaytestPill({ onExit }) {
       </span>
       <span className="hud-test-key">ESC · RETURN</span>
     </button>
+  )
+}
+
+function BowlingObjective() {
+  return (
+    <div className="hud-bowling-objective" aria-label="Objective: smash every can">
+      <TrashIcon />
+      <span>
+        <small>OBJECTIVE</small>
+        <strong>SMASH EVERY CAN</strong>
+      </span>
+    </div>
   )
 }
 
@@ -283,11 +298,10 @@ function GoalMenu() {
                 <MuteWave />
               </div>
             )}
-            <div className="hud-sheet-audio">
-              <span>EXIT RUN</span>
+            <div className="hud-sheet-foot">PAUSED — tap anywhere to resume</div>
+            <div className="hud-sheet-home-wrap">
               <button className="hud-sheet-home" onClick={() => { location.href = '/' }}>HOME</button>
             </div>
-            <div className="hud-sheet-foot">PAUSED — tap anywhere to resume</div>
           </div>
         </div>
       )}
@@ -666,7 +680,11 @@ function StartOverlay() {
   const goalsDone = useGame((s) => s.goalsDone)
   const goals = activeGoals()
   const rules = runRules()
-  const goalProgress = goals.length ? (goalsDone.length / goals.length) * 100 : 0
+  const cansOnly = rules.goalIds?.length === 1 && rules.goalIds[0] === 'cans'
+  const bowlingBest = cansOnly ? Math.min(canBestFor('dog-bowling'), CANS.length) : 0
+  const goalProgress = cansOnly
+    ? (bowlingBest / CANS.length) * 100
+    : goals.length ? (goalsDone.length / goals.length) * 100 : 0
   const onPlay = () => {
     if (out) return
     setOut(true)
@@ -689,12 +707,12 @@ function StartOverlay() {
   return (
     <div className={out ? 'hud-start is-out' : 'hud-start'} aria-labelledby="skate-dog-title">
       <h1 className="hud-sr-only" id="skate-dog-title">Skate Dog</h1>
-      <div className={`hud-start-dock${showGoals || libraryPanel ? ' is-expanded' : ''}`}>
+      <div className={`hud-start-dock${showGoals || libraryPanel ? ' is-expanded' : ''}${cansOnly ? ' is-bowling' : ''}`}>
         {showGoals && (
           <section className="hud-dock-panel" aria-label="Run goals">
             <div className="hud-level-panel-head">
               <div>
-                <div className="hud-brief-head">Run goals</div>
+                <div className="hud-brief-head">{cansOnly ? 'Dog Bowling' : 'Run goals'}</div>
                 <p className="hud-brief-sub">{rules.subtitle ?? 'Complete tricks and explore the park'}</p>
               </div>
               <button className="hud-level-panel-close" onClick={() => setShowGoals(false)} aria-label="Close run goals">✕</button>
@@ -713,10 +731,12 @@ function StartOverlay() {
         )}
         <div className="hud-start-top">
           <button className="hud-play" onClick={onPlay}>
-            <span className="hud-play-badge"><StarIcon className="hud-play-star" /></span>
+            <span className="hud-play-badge">
+              {cansOnly ? <span className="hud-play-bowling" aria-hidden="true">🎳</span> : <StarIcon className="hud-play-star" />}
+            </span>
             <span className="hud-play-copy">
-              <strong>PLAY NOW</strong>
-              <small>Start your run</small>
+              <strong>{cansOnly ? 'PLAY DOG BOWLING' : 'PLAY NOW'}</strong>
+              <small>{cansOnly ? `${rules.time} seconds · ${CANS.length} cans` : 'Start your run'}</small>
             </span>
             <span className="hud-play-key">ENTER ↵</span>
           </button>
@@ -728,10 +748,12 @@ function StartOverlay() {
             }}
             aria-expanded={showGoals}
           >
-            <span className="hud-dynamic-icon"><StarIcon className="hud-brief-star" /></span>
+            <span className="hud-dynamic-icon">
+              {cansOnly ? <span className="hud-dynamic-bowling" aria-hidden="true">🎳</span> : <StarIcon className="hud-brief-star" />}
+            </span>
             <span className="hud-dynamic-copy">
-              <small>RUN GOALS</small>
-              <strong>{goalsDone.length} of {goals.length} complete</strong>
+              <small>{cansOnly ? 'DOG BOWLING' : 'RUN GOALS'}</small>
+              <strong>{cansOnly ? `Best ${bowlingBest}/${CANS.length} cans` : `${goalsDone.length} of ${goals.length} complete`}</strong>
               <span className="hud-dynamic-track" aria-hidden="true">
                 <i style={{ width: `${goalProgress}%` }} />
               </span>
@@ -740,33 +762,45 @@ function StartOverlay() {
           </button>
           {/* full navigation on purpose: EDIT is a module-load const and
               loadLevel/setMusicDuck only run at import under /edit */}
-          <nav className="hud-doors" aria-label="More ways to play">
-            <span className="hud-doors-label">EXPLORE</span>
-            <div className="hud-door-row">
-              <button className="hud-build" onClick={() => { location.href = '/edit' }}>
-                <span aria-hidden="true">🛠️</span> BUILD A PARK <span className="hud-beta">BETA</span>
+          {cansOnly ? (
+            <nav className="hud-doors is-home-only" aria-label="Dog Bowling navigation">
+              <button className="hud-build hud-bowling-home" onClick={() => { location.href = '/' }}>
+                <span aria-hidden="true">←</span> HOME
               </button>
-              {ON_NAMED_LEVEL && (
-                <button className="hud-build" onClick={() => { location.href = '/' }}>
-                  HOME
-                </button>
-              )}
-              <button className="hud-build" onClick={() => {
-                setShowGoals(false)
-                setLibraryPanel((value) => value === 'challenges' ? null : 'challenges')
-              }}>
-                <span aria-hidden="true">🏆</span> MODES <span className="hud-door-count">{challenges.length}</span>
-              </button>
-              {levels.length > 0 && (
+            </nav>
+          ) : (
+            <nav className="hud-doors" aria-label="More ways to play">
+              <span className="hud-doors-label">EXPLORE</span>
+              <div className="hud-door-row">
+                {/* desktop only — the editor is a gizmo + hotkeys + a panel of
+                    steppers, none of which works with a thumb (see EDIT) */}
+                {!TOUCH && (
+                  <button className="hud-build" onClick={() => { location.href = '/edit' }}>
+                    <span aria-hidden="true">🛠️</span> BUILD A PARK <span className="hud-beta">BETA</span>
+                  </button>
+                )}
+                {ON_NAMED_LEVEL && (
+                  <button className="hud-build" onClick={() => { location.href = '/' }}>
+                    HOME
+                  </button>
+                )}
                 <button className="hud-build" onClick={() => {
                   setShowGoals(false)
-                  setLibraryPanel((value) => value === 'levels' ? null : 'levels')
+                  setLibraryPanel((value) => value === 'challenges' ? null : 'challenges')
                 }}>
-                  <span aria-hidden="true">🏞️</span> MY PARKS <span className="hud-door-count">{levels.length}</span>
+                  <span aria-hidden="true">🏆</span> MODES <span className="hud-door-count">{challenges.length}</span>
                 </button>
-              )}
-            </div>
-          </nav>
+                {levels.length > 0 && (
+                  <button className="hud-build" onClick={() => {
+                    setShowGoals(false)
+                    setLibraryPanel((value) => value === 'levels' ? null : 'levels')
+                  }}>
+                    <span aria-hidden="true">🏞️</span> MY PARKS <span className="hud-door-count">{levels.length}</span>
+                  </button>
+                )}
+              </div>
+            </nav>
+          )}
         </div>
         <div className="hud-legend" aria-label="Game controls">
           <span className="hud-legend-label">CONTROLS</span>
@@ -893,7 +927,7 @@ export default function GameUI({ onExitTest } = {}) {
         {!PHOTO && !EDIT && <TimePill />}
         {live && EDIT && !runOver && <PlaytestPill onExit={onExitTest} />}
         {live && !TOUCH && <MuteWave />}
-        {live && !PHOTO && !EDIT && !runOver && <GoalMenu />}
+        {live && !PHOTO && !EDIT && !runOver && (cansOnly ? <BowlingObjective /> : <GoalMenu />)}
       </div>
       <TrickPopup />
       {live && TOUCH && !runOver && (

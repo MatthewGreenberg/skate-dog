@@ -4,7 +4,7 @@ A boy rides a dachshund through a pastel skatepark. React 19 + three.js, in the
 browser, no build step beyond Vite.
 
 ![Skate Dog title screen — the boy on his dachshund at the edge of a pastel
-plaza, bowl and handrails behind him](docs/screenshot.png)
+plaza, bowl and handrails behind him](public/og.webp)
 
 The park is **entirely procedural**. There are no image files and no network
 fetches: every texture is painted into a canvas at load, every piece of geometry

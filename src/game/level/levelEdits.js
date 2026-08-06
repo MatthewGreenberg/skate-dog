@@ -26,7 +26,17 @@ import { characterSize, applyCharacterSizes } from '../components/dogFit.js'
 // No import cycle: store/goals/PlayerController/colliders/rails all import
 // levelData and each other, and none of them imports this file. Checked.
 
-export const EDIT = typeof location !== 'undefined' &&
+// DESKTOP ONLY. The editor is a gizmo, a drag-to-place ground plane and a
+// left-edge panel of steppers — none of it survives a thumb on a 390px screen,
+// and every hotkey (1..9, R, held SPACE to pan) has no touch equivalent. A
+// phone that lands on /edit silently gets the game instead: the button that
+// leads here is hidden on touch, so the only way to arrive is a shared link.
+// Inlined rather than importing input.js's TOUCH — the node checks import this
+// file and it deliberately has no game-module imports.
+const COARSE = typeof window !== 'undefined' && !!window.matchMedia &&
+  window.matchMedia('(pointer: coarse)').matches
+
+export const EDIT = typeof location !== 'undefined' && !COARSE &&
   (new URLSearchParams(location.search).has('edit') || /^\/edit\/?$/.test(location.pathname))
 
 // ?edit opens IN the editor, and that first entry never goes through
@@ -1238,6 +1248,14 @@ const trashCans = (() => {
   return cans
 })()
 
+// A clear runway around the serpentine can course: five posts on each long
+// side, outside the outer can rows so the giant dog never clips a base. Point
+// lights alternate cyan and pink to reinforce the mode's neon-night identity.
+const bowlingLamps = [-28, -14, 0, 14, 28].flatMap((x, i) => [
+  { x, z: 25, banner: null, glow: i % 2 ? '#ff4fd8' : '#26d9ff' },
+  { x, z: -19, banner: null, glow: i % 2 ? '#26d9ff' : '#ff4fd8' },
+])
+
 const dogBowlingLevel = {
   id: 'dog-bowling',
   name: 'Dog Bowling',
@@ -1245,10 +1263,13 @@ const dogBowlingLevel = {
   icon: '🎳',
   description: `30 sec · Bowl over ${trashCans.length} cans`,
   data: {
-    tables: Object.fromEntries(Object.keys(TABLES).map((table) => [table, table === 'CANS' ? trashCans : []])),
+    tables: Object.fromEntries(Object.keys(TABLES).map((table) => [
+      table,
+      table === 'CANS' ? trashCans : table === 'LAMPS' ? bowlingLamps : [],
+    ])),
     spawn: { x: -30, z: 18, heading: Math.PI / 2 },
     bowl: { ...BOWL, on: false },
-    scene: { time: 'sunset', ground: 'classic', pattern: 'slabs' },
+    scene: { time: 'neon', ground: 'asphalt', pattern: 'slabs' },
     // The dog is the bowling ball; the rider stays at the shipped 1.58 size.
     // Both still go through the size-aware mount and animation paths.
     characters: { dog: 2.4, boy: 1.58 },

@@ -400,17 +400,36 @@
   flex: none;
 }
 .hud-sheet-home {
-  padding: calc(var(--u) * 0.35) calc(var(--u) * 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  min-width: calc(var(--u) * 9);
+  padding: calc(var(--u) * 0.58) calc(var(--u) * 1.4);
+  border: 1px solid rgba(255, 255, 255, 0.52);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.94);
+  color: #51318a;
   font: inherit;
-  font-size: calc(var(--u) * 0.78);
+  font-size: calc(var(--u) * 0.82);
+  font-weight: 900;
+  letter-spacing: 0.1em;
   cursor: pointer;
+  box-shadow: 0 calc(var(--u) * 0.2) calc(var(--u) * 0.55) rgba(30, 12, 56, 0.24);
+  transition: transform 0.14s ease, background 0.14s ease;
+}
+.hud-sheet-home:hover,
+.hud-sheet-home:focus-visible {
+  background: #ffe14d;
+  transform: translateY(-1px);
+  outline: none;
+}
+.hud-sheet-home-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: calc(var(--u) * 0.75);
+  padding-top: calc(var(--u) * 0.85);
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
 }
 .hud-sheet-foot {
   margin-top: calc(var(--u) * 0.9);
+  text-align: center;
   color: rgba(255, 255, 255, 0.7);
   font-size: calc(var(--u) * 0.74);
   font-weight: 700;
@@ -451,7 +470,48 @@
   filter: drop-shadow(0 1px 2px rgba(40, 18, 70, 0.35));
 }
 .hud-can-count {
-  min-width: calc(var(--u) * 12.8);
+  min-width: calc(var(--u) * 15.2);
+  padding-left: calc(var(--u) * 0.72);
+  background: linear-gradient(135deg, rgba(89, 47, 154, 0.92), rgba(52, 26, 99, 0.96));
+  border-color: rgba(255, 220, 105, 0.82);
+}
+.hud-bowling-ball {
+  display: grid;
+  flex: none;
+  width: calc(var(--u) * 2.35);
+  height: calc(var(--u) * 2.35);
+  place-items: center;
+  border-radius: calc(var(--u) * 0.7);
+  background: rgba(255, 255, 255, 0.13);
+  font-size: calc(var(--u) * 1.35);
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.hud-bowling-count-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 0.95;
+}
+.hud-bowling-count-copy small {
+  color: #ffdd69;
+  font-size: calc(var(--u) * 0.56);
+  font-weight: 1000;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+.hud-bowling-count-copy strong {
+  margin-top: calc(var(--u) * 0.19);
+  color: #fff;
+  font-size: calc(var(--u) * 1.35);
+  font-weight: 1000;
+  font-variant-numeric: tabular-nums;
+}
+.hud-bowling-count-copy i {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: calc(var(--u) * 0.78);
+  font-style: normal;
+  font-weight: 800;
 }
 
 .hud-score-value {
@@ -462,6 +522,49 @@
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
   text-shadow: 0 1px 2px var(--ink);
+}
+
+.hud-bowling-objective {
+  position: absolute;
+  top: var(--edge);
+  right: var(--edge);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.65);
+  height: calc(var(--u) * 3.5);
+  padding: 0 calc(var(--u) * 1.05) 0 calc(var(--u) * 0.82);
+  border: var(--rim) solid rgba(255, 220, 105, 0.82);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(89, 47, 154, 0.86), rgba(52, 26, 99, 0.91));
+  color: #fff;
+  box-shadow: 0 calc(var(--u) * 0.18) calc(var(--u) * 0.5) rgba(36, 14, 62, 0.28);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.hud-bowling-objective > span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.02;
+}
+.hud-bowling-objective small {
+  color: #ffdd69;
+  font-size: calc(var(--u) * 0.5);
+  font-weight: 1000;
+  letter-spacing: 0.14em;
+}
+.hud-bowling-objective strong {
+  margin-top: calc(var(--u) * 0.15);
+  font-size: calc(var(--u) * 0.74);
+  font-weight: 1000;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+@media (pointer: coarse) {
+  .hud-bowling-objective { --u: calc(var(--u0) * 0.74); }
+}
+@media (max-width: 620px) {
+  .hud-bowling-objective strong { display: none; }
+  .hud-bowling-objective small { font-size: calc(var(--u) * 0.58); }
 }
 
 
@@ -644,6 +747,21 @@
     0 calc(var(--u) * 1.05) calc(var(--u) * 2.8) rgba(40, 17, 70, 0.36),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
+.hud-start-dock.is-bowling {
+  border-color: rgba(255, 213, 83, 0.88);
+  box-shadow:
+    0 calc(var(--u) * 0.9) calc(var(--u) * 2.4) rgba(40, 17, 70, 0.36),
+    0 0 0 calc(var(--u) * 0.12) rgba(255, 211, 79, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+.hud-start-dock.is-bowling .hud-play {
+  background: linear-gradient(135deg, #7f4bcc, #49218d);
+  border-color: #ffdd69;
+}
+.hud-start-dock.is-bowling .hud-dynamic-status {
+  background: linear-gradient(135deg, #fff8dc, #f3e6bc);
+  border-color: rgba(168, 113, 26, 0.2);
+}
 .hud-start-top {
   display: grid;
   grid-template-columns: minmax(calc(var(--u) * 17), 1fr) minmax(calc(var(--u) * 16), 0.88fr) minmax(calc(var(--u) * 20), 1.25fr);
@@ -684,6 +802,11 @@
   border-radius: calc(var(--u) * 0.65);
   background: #fff;
   box-shadow: 0 calc(var(--u) * 0.15) calc(var(--u) * 0.4) rgba(69, 36, 113, 0.12);
+}
+.hud-dynamic-bowling,
+.hud-play-bowling {
+  font-size: calc(var(--u) * 1.35);
+  line-height: 1;
 }
 .hud-dynamic-copy {
   display: flex;
@@ -1073,6 +1196,27 @@
   display: flex;
   flex-wrap: wrap;
   gap: calc(var(--u) * 0.42);
+}
+.hud-doors.is-home-only {
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  padding-left: 0;
+}
+.hud-bowling-home {
+  justify-content: center;
+  min-height: auto;
+  padding: calc(var(--u) * 0.48) calc(var(--u) * 0.9);
+  border-color: rgba(112, 69, 170, 0.22);
+  background: linear-gradient(#fff, #f1e8fa);
+  color: #5b329f;
+  font-size: calc(var(--u) * 0.68);
+  letter-spacing: 0.08em;
+  box-shadow: none;
+}
+.hud-bowling-home > span {
+  font-size: calc(var(--u) * 0.86);
+  line-height: 1;
 }
 /* CHALLENGES and MY LEVELS share one library panel shell, but are separate
    collections: shipped modes never masquerade as something the user made. */

@@ -1243,7 +1243,7 @@ export function LampPosts() {
         <pointLight
           key={i}
           position={[l.x, (l.base || 0) + LAMP_LIGHT_Y, l.z]}
-          color={LAMP_COLORS.glow}
+          color={l.glow ?? LAMP_COLORS.glow}
           intensity={60}
           distance={11}
           decay={2}

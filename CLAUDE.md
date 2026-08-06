@@ -1482,6 +1482,15 @@ offset the object already had. Placement and the cursor ghost run the same
 click produces. The snap lines are built ONCE per drag — the sources don't move
 while you drag one of them.
 
+**The editor is DESKTOP ONLY.** `EDIT` is gated on `(pointer: coarse)` being
+false — a gizmo, a drag-to-place ground plane and a panel of steppers do not
+survive a thumb on a 390px screen, and 1..9 / R / held-SPACE have no touch
+equivalent. A phone that lands on `/edit` silently gets the game instead, and
+GameUI hides the BUILD A PARK button under `TOUCH`, so the only way to arrive
+there is a link shared off a desktop. The coarse test is INLINED in
+levelEdits.js rather than imported from input.js: the node checks import this
+file and it deliberately pulls in no game modules.
+
 **The saved level is the editor's workbench, not the game.** `loadLevel()` runs
 at import only under `?edit` — a plain visit is always the SHIPPED park, so
 somebody else's session can't hand you a level you never built. Going to PLAY

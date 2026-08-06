@@ -220,7 +220,10 @@ export const PLANTERS = [
   { x: 30, z: -16.5, w: 4, d: 3, base: DECK, h: 0.95, plant: 'flowers' },
   { x: 14.5, z: -15.2, w: 3, d: 2.6, base: DECK, h: 0.95, plant: 'flowers' },
   { x: -18.5, z: 9.8, w: 3, d: 2.6, h: 0.95, plant: 'flowers' },
-  { x: 27.5, z: 7.5, w: 4, d: 3.4, h: 0.95, plant: 'tree' },
+  // 2.5m further off stairC than it was: at z 7.5 the bed cleared the treads by
+  // 1.4m but the tree's canopy hung over the bottom step and the approach read
+  // as blocked.
+  { x: 27.5, z: 10, w: 4, d: 3.4, h: 0.95, plant: 'tree' },
   { x: 15.5, z: 21.5, w: 5, d: 3.4, h: 0.95, plant: 'flowers' },
   { x: -24, z: -30, w: 6, d: 4, h: 0.95, plant: 'tree' },
   { x: 21.5, z: -14.6, w: 3, d: 2.6, base: DECK, h: 0.95, plant: 'flowers' },
@@ -304,7 +307,8 @@ export const LAMPS = [
   { x: -23.5, z: -17, banner: null },
   { x: 3.5, z: -17.5, banner: 'flower' },
   { x: 24, z: -30, base: DECK, banner: null },
-  { x: 36, z: -2, banner: 'skate' },
+  // no lamp at (36, -2): it stood outside the kerb behind deckB's 3m-thick east
+  // wall, which swallowed the whole shaft and left the lantern head floating.
   { x: -18.5, z: 24, banner: 'flower' },
   { x: 13.5, z: 18, banner: null },
   { x: 33.5, z: -19, base: DECK, banner: null },

@@ -4,7 +4,7 @@
 //
 // The model is deliberately blunt: the editor MUTATES levelData's exported
 // arrays in place, then bumps a version. Everything downstream is either a
-// pure function of those arrays (Skatepark/Props geometry, remounted on the
+// pure function of those arrays (Skatepark/Props geometry, refreshed by the
 // version) or was snapshotted at module load and gets an explicit rebuild
 // (colliders, rail paths). There is no separate document format to keep in
 // sync with the level — the level IS the document.
@@ -15,7 +15,7 @@ import { SOLIDS, WALLS, PLANTERS, RAILS, BENCHES, LAMPS, BONES, LETTERS, CANS, S
 import { rebuildColliders } from './colliders.js'
 import { rebuildPaths } from './rails.js'
 import { invalidateParkAO } from './textures.js'
-import { P, useGame } from '../store.js'
+import { P, useGame, runRules, setRunRules } from '../store.js'
 import { resetPlayer } from '../player/PlayerController.js'
 import { resetGoals } from '../goals.js'
 import { setMusicDuck, sfxPlace, sfxDelete } from '../audio/AudioManager.js'
@@ -46,7 +46,7 @@ export { SPAWN, BOWL }
 // Level-wide look has its own reactive source of truth. Lighting, Plaza, and
 // the editor subscribe directly, so a swatch click never needs the broad level
 // rebuild signal used by geometry/colliders.
-const SCENE_DEFAULTS = { time: 'sunset', ground: 'classic', pattern: 'slabs', brickHue: 0 }
+const SCENE_DEFAULTS = { time: 'sunset', ground: 'classic', pattern: 'slabs' }
 export const useSceneSettings = create(() => ({ ...SCENE_DEFAULTS }))
 export const sceneSettings = () => useSceneSettings.getState()
 
@@ -74,6 +74,11 @@ export const TIMES = [
   { id: 'night', label: 'Night', swatch: '#252b58', key: '#a9c5ff', keyK: 0.48, amb: 0.72, envK: 0.76,
     sky: '#20264e', skyHigh: '#171b3d', fog: '#303762', hemiSky: '#6979bd', hemiGround: '#6d496b',
     fill: '#536bd0', envWarm: '#bd78ac', envZenith: '#4f61a8', envFill: '#405ac5', bounce: '#8f5873' },
+  // A stylised nightlife hour, but still only the lighting axis: choosing it
+  // never changes the user's ground colour or floor pattern.
+  { id: 'neon', label: 'Neon', swatch: '#ff5fd0', key: '#ff5fd0', keyK: 0.62, amb: 0.82, envK: 0.9,
+    sky: '#161038', skyHigh: '#0a081f', fog: '#2c1548', hemiSky: '#5a4bd8', hemiGround: '#ff4fa0',
+    fill: '#22d4e8', envWarm: '#ff5fb0', envZenith: '#3a2a80', envFill: '#1fb8d8', bounce: '#c04fd0' },
 ]
 
 // Multiplies the plaza albedo (the map stays, so the pavers survive the tint).
@@ -98,7 +103,6 @@ export const GROUNDS = [
 export const PATTERNS = [
   { id: 'slabs', label: 'Big slabs', swatch: 'repeating-linear-gradient(90deg, #ecdcd3 0 10px, #cbb8af 10px 12px)', bump: 0.22, rough: 0.74, env: 0.75 },
   { id: 'tiles', label: 'Playground tile', swatch: 'repeating-linear-gradient(45deg, #f1ded6 0 5px, #bda49e 5px 7px)', bump: 0.52, rough: 0.82, env: 0.55 },
-  { id: 'brick', label: 'Running brick', swatch: 'repeating-linear-gradient(0deg, #e8cabd 0 6px, #9f7e79 6px 8px)', bump: 0.4, rough: 0.9, env: 0.45 },
   { id: 'checker', label: 'Polished checker', swatch: 'conic-gradient(#f2e0d8 0 25%, #997b82 0 50%, #f2e0d8 0 75%, #997b82 0)', bump: 0.16, rough: 0.56, env: 1.15 },
   { id: 'concrete', label: 'Poured concrete', swatch: 'linear-gradient(135deg, #e3d7d0, #b8aaa8)', bump: 0.06, rough: 0.96, env: 0.3 },
   { id: 'wood', label: 'Glossy boardwalk', swatch: 'repeating-linear-gradient(0deg, #d6ad78 0 5px, #76543c 5px 7px)', bump: 0.58, rough: 0.58, env: 1.1 },
@@ -126,10 +130,9 @@ export function setCharacterSize(who, value) {
   saveLevel()
 }
 
-// React keys. WALLS/PLANTERS/BENCHES/LAMPS have no `id`, and Skatepark keys
-// them by array index — which breaks the first time you delete or duplicate.
-// One stable key per row, assigned on creation, sidesteps it without touching
-// levelData's schema.
+// Stable editor keys. Several tables have no `id`; array indices break the
+// outliner, selection proxies, and inspector identity after a delete or
+// duplicate. One key per row sidesteps that without changing the saved schema.
 let nextKey = 0
 export const keyOf = (row) => (row.__k ??= ++nextKey)
 for (const rows of Object.values(TABLES)) for (const r of rows) keyOf(r)
@@ -139,7 +142,7 @@ let version = 0
 const subs = new Set()
 export const subscribeLevel = (fn) => (subs.add(fn), () => subs.delete(fn))
 export const levelVersion = () => version
-/** Re-renders on every commit. Put it on a `key` to force a rebake. */
+/** Re-renders on every commit. Consumers content-key only the changed table. */
 export const useLevelVersion = () => useSyncExternalStore(subscribeLevel, levelVersion, levelVersion)
 
 // Selection + tool state, shared across the Canvas boundary (the proxy layer
@@ -148,8 +151,13 @@ export const useLevelVersion = () => useSyncExternalStore(subscribeLevel, levelV
 export const useEditor = create((set) => ({
   table: 'SOLIDS', // the panel opens on a populated table, not an empty list
   row: null,
+  // Every selected editable row, including `row`. `row` remains the active
+  // member so the existing inspector and gizmo have one unambiguous target;
+  // Shift-click adds/removes members for batch actions.
+  selection: [],
   mode: 'translate', // W/E/R
-  snap: 0.5,
+  undoAvailable: false,
+  redoAvailable: false,
   // LIVE editing state, not the URL flag: `?edit` says the editor exists at
   // all, this says which half you are in. Toggling it must not need a reload —
   // build, play, come back.
@@ -171,10 +179,21 @@ export const useEditor = create((set) => ({
   // height-match note from placementInfo, or null. hintWarn styles it.
   hint: null,
   hintWarn: false,
-  arm: (tool) => set((s) => ({ add: s.add === tool ? null : tool, row: null, bowlSel: false, specialSel: null, hint: null, hintWarn: false })),
-  select: (table, row) => set({ table, row, add: null, bowlSel: false, specialSel: null, hint: null, hintWarn: false }),
-  selectSpecial: (specialSel) => set({ row: null, add: null, bowlSel: false, specialSel, hint: null, hintWarn: false }),
-  clear: () => set({ row: null, bowlSel: false, specialSel: null }),
+  arm: (tool) => set((s) => ({ add: s.add === tool ? null : tool, row: null, selection: [], bowlSel: false, specialSel: null, hint: null, hintWarn: false })),
+  select: (table, row, multiple = false) => set((s) => {
+    if (!multiple) return { table, row, selection: [{ table, row }], add: null, bowlSel: false, specialSel: null, hint: null, hintWarn: false }
+    const i = s.selection.findIndex((item) => item.table === table && item.row === row)
+    if (i < 0) return { table, row, selection: [...s.selection, { table, row }], add: null, bowlSel: false, specialSel: null, hint: null, hintWarn: false }
+    const selection = s.selection.filter((_, n) => n !== i)
+    const active = selection.at(-1)
+    return { table: active?.table ?? table, row: active?.row ?? null, selection, add: null, bowlSel: false, specialSel: null, hint: null, hintWarn: false }
+  }),
+  selectSpecial: (specialSel) => set({ row: null, selection: [], add: null, bowlSel: false, specialSel, hint: null, hintWarn: false }),
+  // The neutral pointer tool: unlike clear(), this also drops an armed add
+  // tool. V and the panel button both come through here so they cannot leave a
+  // hidden selection or placement ghost behind.
+  picker: () => set({ row: null, selection: [], add: null, bowlSel: false, specialSel: null, hint: null, hintWarn: false }),
+  clear: () => set({ row: null, selection: [], bowlSel: false, specialSel: null }),
   set,
 }))
 
@@ -186,18 +205,18 @@ export const useEditing = () => useEditor((s) => s.editing)
  * Plaza AO is deliberately deferred while editing. Its 1024px blurred bake is
  * cosmetic and was the dominant commit hitch; playtest entry refreshes it once
  * after the final edit instead of once per stepper click or gizmo drag. */
-export function bumpLevel({ refreshAO = !useEditor.getState().editing } = {}) {
+export function bumpLevel({ refreshAO = !useEditor.getState().editing, persist = true } = {}) {
   rebuildColliders()
   rebuildPaths()
   // The plaza's baked contact shadows are a function of the rows too; without
   // this the park keeps the shadow of every prop you moved. Skatepark re-reads
-  // it on the remount this version bump causes.
+  // it when this version bump refreshes its authored geometry.
   if (refreshAO) invalidateParkAO()
   // ponytail: autosave on every commit, undebounced on purpose. The level is a
   // few kB of JSON and a commit only fires on drag-end or a field blur, so this
   // is a handful of writes per minute — a debounce would be more moving parts
   // than the thing it protects.
-  saveLevel()
+  if (persist) saveLevel()
   version++
   for (const fn of subs) fn()
 }
@@ -227,7 +246,7 @@ export function setEditing(on) {
     // introduced to the park.
     P.intro = 0
   }
-  useEditor.setState({ editing: on, row: null, add: null, bowlSel: false, specialSel: null })
+  useEditor.setState({ editing: on, row: null, selection: [], add: null, bowlSel: false, specialSel: null })
 }
 
 export const toggleEditing = () => setEditing(!useEditor.getState().editing)
@@ -245,8 +264,8 @@ const characterSnapshot = () => {
 }
 
 const sceneSnapshot = () => {
-  const { time, ground, pattern, brickHue } = sceneSettings()
-  return { time, ground, pattern, brickHue }
+  const { time, ground, pattern } = sceneSettings()
+  return { time, ground, pattern }
 }
 
 // SPAWN and the whole BOWL ride along: they are level state the editor can
@@ -261,6 +280,7 @@ const snap = () => ({
   bowl: { ...BOWL },
   scene: sceneSnapshot(),
   characters: characterSnapshot(),
+  rules: runRules(),
 })
 
 function restore(s) {
@@ -275,6 +295,7 @@ function restore(s) {
   Object.assign(BOWL, typeof s.bowl === 'boolean' ? { on: s.bowl } : s.bowl)
   if (s.scene) useSceneSettings.setState(s.scene)
   if (s.characters) applyCharacterSizes(s.characters.dog, s.characters.boy)
+  setRunRules(s.rules)
   bumpLevel()
 }
 
@@ -283,6 +304,7 @@ export function begin() {
   past.push(snap())
   if (past.length > LIMIT) past.shift()
   future.length = 0
+  useEditor.setState({ undoAvailable: true, redoAvailable: false })
 }
 
 /** Call AFTER a mutation. Rebuilds derived data and re-renders the park. */
@@ -291,13 +313,17 @@ export const commit = bumpLevel
 export function undo() {
   if (!past.length) return
   future.push(snap())
-  restore(past.pop())
+  const state = past.pop()
+  useEditor.setState({ undoAvailable: past.length > 0, redoAvailable: true })
+  restore(state)
 }
 
 export function redo() {
   if (!future.length) return
   past.push(snap())
-  restore(future.pop())
+  const state = future.pop()
+  useEditor.setState({ undoAvailable: true, redoAvailable: future.length > 0 })
+  restore(state)
 }
 
 export const canUndo = () => past.length > 0
@@ -305,8 +331,8 @@ export const canRedo = () => future.length > 0
 
 // ------------------------------------------------------------------ editing
 /** Rows the editor may offer. `derived` rows are recomputed from another row
- *  (handrails from their stair, the arc wall and bowl benches from BOWL) and
- *  an edit to one is silently thrown away on the next reload. */
+ *  (currently handrails from their stair), and an edit to one is silently
+ *  thrown away on the next reload. */
 export const editable = (table) => TABLES[table].filter((r) => !r.derived)
 
 const DEFAULTS = {
@@ -314,7 +340,7 @@ const DEFAULTS = {
   // requires, so a tool that patches kind to 'ramp' does not arrive carrying a
   // box's fields as well.
   SOLIDS: () => ({ kind: 'box', id: `box${nextKey + 1}`, x: 0, z: 0, w: 4, d: 4, rot: 0, base: 0 }),
-  WALLS: () => ({ x: 0, z: 0, w: 4, d: 0.6, rot: 0, base: 0, h: 1.15, mural: null }),
+  WALLS: () => ({ x: 0, z: 0, w: 4, d: 0.6, rot: 0, base: 0, h: 1.15, bend: 0, mural: null }),
   PLANTERS: () => ({ x: 0, z: 0, w: 3, d: 3, rot: 0, base: 0, h: 0.95, plant: 'flowers' }),
   RAILS: () => ({ id: `rail${nextKey + 1}`, color: 'railTeal', posts: 'flat', pts: [[-3, 0.55, 0], [3, 0.55, 0]] }),
   BENCHES: () => ({ x: 0, z: 0, rot: 0, base: 0 }),
@@ -333,7 +359,7 @@ const DEFAULTS = {
 // tangent and took the whole sim down on the first rideable frame.
 const NEEDS = {
   SOLIDS: { rot: 0, base: 0 },
-  WALLS: { rot: 0, base: 0, h: 1.15 },
+  WALLS: { rot: 0, base: 0, h: 1.15, bend: 0 },
   PLANTERS: { rot: 0, base: 0 },
   BENCHES: { rot: 0, base: 0 },
   LAMPS: { base: 0 },
@@ -388,6 +414,141 @@ export function rotateGroup(table, row, yaw) {
   }
 }
 
+const HP_QUARTER_RUN = 2.4
+const HP_DECK_RUN = 1.4
+const HP_MIN_FLAT = 0.25
+
+/** Resolve the five authored rows into their structural roles. The low box is
+ *  the platform; each remaining box is paired with the quarter whose outward
+ *  axis it lies along. Projection pairing still works on a malformed save
+ *  where one row's depth was edited by itself. */
+function halfpipeParts(table, row) {
+  if (table !== 'SOLIDS' || !row.grp) return null
+  const members = groupOf(table, row)
+  const quarters = members.filter((r) => r.kind === 'ramp' && r.curve === 'quarter')
+  const boxes = members.filter((r) => r.kind === 'box')
+  if (quarters.length !== 2 || boxes.length < 3) return null
+  const base = Math.max(...quarters.map((r) => r.y0))
+  const platform = boxes.find((r) => Math.abs(r.top - base) < 1e-6) ?? boxes.reduce((a, b) => (a.d > b.d ? a : b))
+  const unused = new Set(boxes.filter((r) => r !== platform))
+  const decks = quarters.map((q) => {
+    const ux = Math.sin(q.rot || 0), uz = Math.cos(q.rot || 0)
+    let best = null, bestAlong = -Infinity
+    for (const box of unused) {
+      const along = (box.x - platform.x) * ux + (box.z - platform.z) * uz
+      if (along > bestAlong) { best = box; bestAlong = along }
+    }
+    unused.delete(best)
+    return best
+  })
+  return { members, quarters, decks, platform }
+}
+
+/** Resize a grouped halfpipe without pulling its five authored pieces apart.
+ *
+ * A quarter whose rise passes its run is healed by growing `d`. That growth
+ * has to happen behind the coping: keep each low edge (and therefore the flat)
+ * fixed, push its coping and top deck outward, and grow the platform under the
+ * new footprint. Both facing quarters share the requested top height even
+ * when the user happened to select only one of them. */
+function setHalfpipeHeight(table, row, name, value) {
+  if (typeof value !== 'number' || (name !== 'y1' && name !== 'top')) return false
+  const parts = halfpipeParts(table, row)
+  if (!parts) return false
+  const { quarters, decks, platform } = parts
+
+  const oldTop = Math.max(...quarters.map((r) => r.y1))
+  const base = Math.max(...quarters.map((r) => r.y0))
+  // A click on the low platform still represents the whole grouped object.
+  // Its own `top` is the base, so interpret that control as a height DELTA;
+  // quarter/top-deck fields already carry the halfpipe's absolute top.
+  const selectedIsBase = row.kind === 'box' && Math.abs(row.top - base) < 1e-6
+  const targetTop = Math.max(base + 0.25, selectedIsBase ? oldTop + value - row.top : value)
+
+  const old = quarters.map((q) => {
+    const ux = Math.sin(q.rot || 0), uz = Math.cos(q.rot || 0)
+    return { q, ux, uz, d: q.d, hx: q.x + ux * q.d / 2, hz: q.z + uz * q.d / 2 }
+  })
+  // A pre-fix save may already have one transition grown around its centre
+  // while the base stayed unchanged (the screenshot failure). Normally the
+  // remaining flat is encoded by the five current extents. If that value has
+  // already collapsed, recover the authored halfpipe's 3.2m flat while the
+  // coordinated layout below repairs the bad centres.
+  const deckRun = decks.reduce((sum, deck) => sum + deck.d, 0)
+  const encodedFlat = platform.d - deckRun - old.reduce((sum, a) => sum + a.d, 0)
+  // If only one side was stretched by the old bug, the untouched (shorter)
+  // run still lets us recover the original symmetric flat from the platform.
+  const stableFlat = platform.d - deckRun - 2 * Math.min(...old.map((a) => a.d))
+  const recoveredFlat = Math.max(encodedFlat, stableFlat)
+  const flat = recoveredFlat >= 0.25 ? recoveredFlat : 3.2
+
+  for (let i = 0; i < old.length; i++) {
+    const a = old[i]
+    a.q.y1 = targetTop
+    heal(table, a.q)
+    // Re-author from the stable platform centre, not incrementally from the
+    // quarter's old centre. Besides keeping a clean pipe clean, this repairs a
+    // legacy save that already contains the inward-growing broken geometry.
+    a.q.x = platform.x + a.ux * (flat / 2 + a.q.d / 2)
+    a.q.z = platform.z + a.uz * (flat / 2 + a.q.d / 2)
+    decks[i].x = platform.x + a.ux * (flat / 2 + a.q.d + decks[i].d / 2)
+    decks[i].z = platform.z + a.uz * (flat / 2 + a.q.d + decks[i].d / 2)
+    decks[i].top = targetTop
+  }
+
+  // The base platform spans both outer deck edges.
+  platform.d = flat + quarters.reduce((sum, q) => sum + q.d, 0) + decks.reduce((sum, deck) => sum + deck.d, 0)
+  return true
+}
+
+/** Width is the halfpipe's shared cross-axis span, not a property of whichever
+ *  of its five rows happened to receive the click. Keep every transition,
+ *  deck and the platform on one width; assigning the requested value to all
+ *  members also repairs saves made while only one piece was being resized. */
+function setHalfpipeWidth(table, row, name, value) {
+  if (name !== 'w' || typeof value !== 'number') return false
+  const parts = halfpipeParts(table, row)
+  if (!parts) return false
+  for (const member of parts.members) member.w = value
+  return true
+}
+
+/** Length is the complete deck-to-deck footprint. The curved runs and top
+ *  decks keep their authored shape; changing the overall length changes the
+ *  flat between them and moves both sides symmetrically. This also heals a
+ *  legacy split where one transition/deck/platform had its `d` edited alone. */
+function setHalfpipeLength(table, row, name, value) {
+  if (name !== 'd' || typeof value !== 'number') return false
+  const parts = halfpipeParts(table, row)
+  if (!parts) return false
+  const { quarters, decks, platform } = parts
+  const quarterRun = Math.max(HP_QUARTER_RUN, ...quarters.map((q) => q.y1 - q.y0))
+  const minLength = quarterRun * 2 + HP_DECK_RUN * 2 + HP_MIN_FLAT
+  const length = Math.max(minLength, value)
+  const flat = length - quarterRun * 2 - HP_DECK_RUN * 2
+
+  for (let i = 0; i < quarters.length; i++) {
+    const q = quarters[i], deck = decks[i]
+    const ux = Math.sin(q.rot || 0), uz = Math.cos(q.rot || 0)
+    q.d = quarterRun
+    deck.d = HP_DECK_RUN
+    q.x = platform.x + ux * (flat / 2 + quarterRun / 2)
+    q.z = platform.z + uz * (flat / 2 + quarterRun / 2)
+    deck.x = platform.x + ux * (flat / 2 + quarterRun + HP_DECK_RUN / 2)
+    deck.z = platform.z + uz * (flat / 2 + quarterRun + HP_DECK_RUN / 2)
+  }
+  platform.d = length
+  return true
+}
+
+/** Value the editor should show for a physical dimension. A halfpipe member's
+ *  local `d` is an implementation detail; its user-facing Length is the whole
+ *  platform footprint regardless of which of the five rows was clicked. */
+export function dimensionValue(table, row, name) {
+  const parts = name === 'd' && halfpipeParts(table, row)
+  return parts ? parts.platform.d : row[name]
+}
+
 /** Write one inspector field. Goes through heal() because `kind` and `style`
  *  change which OTHER fields the row is required to carry. */
 export function setField(table, row, name, value) {
@@ -398,6 +559,9 @@ export function setField(table, row, name, value) {
   if (row.grp && typeof value === 'number') {
     if (name === 'x' || name === 'z') return moveGroup(table, row, name === 'x' ? value - row.x : 0, name === 'z' ? value - row.z : 0), row
     if (name === 'rot') return rotateGroup(table, row, value), row
+    if (setHalfpipeWidth(table, row, name, value)) return row
+    if (setHalfpipeLength(table, row, name, value)) return row
+    if (setHalfpipeHeight(table, row, name, value)) return row
   }
   row[name] = value
   return heal(table, row)
@@ -449,9 +613,56 @@ export function liftRail(row, dy) {
   return row
 }
 
-// ponytail: no add-a-bend control — a new point you cannot then drag changes
-// nothing on screen. Add it with a per-point handle in Editor.jsx if curved
-// rails ever get authored here rather than in levelData.
+/** Resample a polyline to `n` evenly spaced points. A two-point rail has no
+ *  interior points to move, so bending has to give it some first. */
+function resamplePts(pts, n) {
+  const L = []
+  let total = 0
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2])
+    L.push(d)
+    total += d
+  }
+  if (!(total > 1e-4)) return pts.map((p) => p.slice())
+  const out = []
+  for (let k = 0; k < n; k++) {
+    let s = (total * k) / (n - 1)
+    let i = 0
+    while (i < L.length - 1 && s > L[i]) { s -= L[i]; i++ }
+    const t = L[i] > 1e-6 ? s / L[i] : 0
+    out.push([0, 1, 2].map((j) => pts[i][j] + (pts[i + 1][j] - pts[i][j]) * t))
+  }
+  return out
+}
+
+/** Bow the rail by `a` radians of TOTAL arc. Each segment is yawed by an equal
+ *  share of it and the chain rebuilt end to end, so segment lengths — and
+ *  therefore railLength — are untouched: Bend and Length stay independent
+ *  steppers. The result is recentred on the old centroid, or bending would
+ *  also walk the rail across the park. */
+export function bendRail(row, a) {
+  const p = row.pts.length >= 5 ? row.pts.map((q) => q.slice()) : resamplePts(row.pts, 5)
+  const m = p.length - 1
+  if (m < 1) return row
+  let cx = 0, cz = 0
+  for (const q of p) { cx += q[0] / p.length; cz += q[2] / p.length }
+  const out = [[0, p[0][1], 0]]
+  for (let i = 0; i < m; i++) {
+    const dx = p[i + 1][0] - p[i][0], dz = p[i + 1][2] - p[i][2]
+    const th = (i - (m - 1) / 2) * (a / m)
+    const c = Math.cos(th), s = Math.sin(th)
+    const b = out[i]
+    out.push([b[0] + dx * c - dz * s, p[i + 1][1], b[2] + dx * s + dz * c])
+  }
+  let nx = 0, nz = 0
+  for (const q of out) { nx += q[0] / out.length; nz += q[2] / out.length }
+  for (const q of out) { q[0] += cx - nx; q[2] += cz - nz }
+  row.pts = out
+  return row
+}
+
+// ponytail: still no per-POINT handle — bend/extend/turn/lift cover shaping a
+// rail from the card. Add one in Editor.jsx if freeform kinks are ever wanted.
 
 export const canAdd = (table) => table in DEFAULTS
 
@@ -480,10 +691,10 @@ export const TOOLS = [
     patch: { kind: 'box', w: 12, d: 10.8, top: 2.35, style: 'solid' },
     group: [
       { kind: 'box', w: 12, d: 10.8, top: 0.35, style: 'solid' },
-      { kind: 'ramp', w: 12, d: 2.4, dz: -2.8, drot: Math.PI, y0: 0.35, y1: 2.35, curve: 'quarter', style: 'solid' },
-      { kind: 'ramp', w: 12, d: 2.4, dz: 2.8, drot: 0, y0: 0.35, y1: 2.35, curve: 'quarter', style: 'solid' },
-      { kind: 'box', w: 12, d: 1.4, dz: -4.7, top: 2.35, style: 'solid' },
-      { kind: 'box', w: 12, d: 1.4, dz: 4.7, top: 2.35, style: 'solid' },
+      { kind: 'ramp', w: 12, d: HP_QUARTER_RUN, dz: -2.8, drot: Math.PI, y0: 0.35, y1: 2.35, curve: 'quarter', style: 'solid' },
+      { kind: 'ramp', w: 12, d: HP_QUARTER_RUN, dz: 2.8, drot: 0, y0: 0.35, y1: 2.35, curve: 'quarter', style: 'solid' },
+      { kind: 'box', w: 12, d: HP_DECK_RUN, dz: -4.7, top: 2.35, style: 'solid' },
+      { kind: 'box', w: 12, d: HP_DECK_RUN, dz: 4.7, top: 2.35, style: 'solid' },
     ] },
   { id: 'wall', table: 'WALLS', label: 'Wall', glyph: '🧱', tint: '#ffcbcb', ghost: [4, 1.15, 0.6, 0.575] },
   { id: 'rail', table: 'RAILS', label: 'Rail', glyph: '🛤️', tint: '#c8e6ff', ghost: [6, 0.4, 0.4, 0.55] },
@@ -493,6 +704,9 @@ export const TOOLS = [
   { id: 'can', table: 'CANS', label: 'Can', glyph: '🗑️', tint: '#cff0ea', ghost: [0.7, 1, 0.7, 0.5] },
   { id: 'bone', table: 'BONES', label: 'Bone', glyph: '🦴', tint: '#ece2ff', ghost: [0.9, 0.9, 0.9, 1.6] },
   { id: 'letter', table: 'LETTERS', label: 'Letter', glyph: '🔤', tint: '#ffd4ef', ghost: [0.9, 0.9, 0.9, 1.6] },
+  // One analytic pool exists at most. Editor.jsx handles this special tool by
+  // placing BOWL itself rather than adding a table row.
+  { id: 'pool', table: null, special: 'pool', label: 'Pool', glyph: '🏊', tint: '#c8e6ff', ghost: [11.7, 0.08, 11.7, 0.04] },
 ]
 export const TOOL = Object.fromEntries(TOOLS.map((t) => [t.id, t]))
 
@@ -557,10 +771,10 @@ export const LOOKS = {
   }),
 }
 
-// ------------------------------------------------------ placement guidance
-// Pure level queries the cursor ghost reads to steer placement GENTLY: the
-// return is a hint string and a suggested rise, never a veto — overlapping on
-// purpose stays possible, it just stops being the thing you do by accident.
+// ------------------------------------------------------ placement validation
+// Pure level queries shared by the cursor ghost and the placement click. A red
+// warning is authoritative: the same result that colours the ghost also sets
+// `block`, so preview and behavior cannot disagree.
 const BLOCK_TABLES = ['SOLIDS', 'WALLS', 'PLANTERS', 'BENCHES']
 
 /** [hx, hz, top] of a row's world AABB (conservative under yaw), or null for
@@ -582,12 +796,13 @@ function extents(table, r) {
 const inside = (px, pz, r, e) => Math.abs(px - r.x) < e[0] && Math.abs(pz - r.z) < e[1]
 const nameOf = (table, r) => r.id ?? `the ${table.toLowerCase().replace(/s$/, '')}`
 
-/** What placing `toolId` at (x, z, rot) would run into: { warn, matchTop }.
- *  warn is a one-line nudge for the hint line; matchTop is a deck top the
- *  ramp's rise should meet (the vertical twin of the flush-face snap). */
+/** What placing `toolId` at (x, z, rot) would run into. `warn` supplies the
+ *  hint/red preview and also implies `block`; matchTop is a deck top the ramp's
+ *  rise should meet (the vertical twin of the flush-face snap). */
 export function placementInfo(toolId, x, z, rot = 0) {
   const tool = TOOL[toolId]
   if (!tool) return { warn: null, matchTop: null, block: false }
+  if (tool.special === 'pool') return { warn: null, matchTop: null, block: false }
   const cand = heal(tool.table, { ...DEFAULTS[tool.table](), ...tool.patch, x, z, rot })
   return rowInfo(tool.table, cand, tool.label)
 }
@@ -596,8 +811,7 @@ function rowInfo(table, cand, label = 'It') {
   const me = extents(table, cand)
   if (!me) return { warn: null, matchTop: null, block: false }
   // The pool is a HOLE — a grounded row footed inside it floats on air the
-  // plaza no longer draws. This is the one placement that is refused outright
-  // (`block`), not just flagged: floaters (bones, letters) never reach here,
+  // plaza no longer draws. Floaters (bones, letters) never reach here because
   // extents() has no case for them, so an air line over the bowl still works.
   if (BOWL.on) {
     for (const [px, pz] of [
@@ -664,7 +878,7 @@ function rowInfo(table, cand, label = 'It') {
     }
   }
 
-  return { warn, matchTop, block: false }
+  return { warn, matchTop, block: !!warn }
 }
 
 /** Add a fresh row at (x, z), yawed by `rot`. `what` is a TOOL id or a bare
@@ -745,17 +959,32 @@ export function duplicateRow(table, row) {
 }
 
 export function deleteRow(table, row) {
-  const i = TABLES[table].indexOf(row)
-  if (i < 0) return
+  deleteRows([{ table, row }])
+}
+
+/** Delete an additive selection as one edit/undo step. Grouped rows are
+ * expanded and de-duplicated first, so selecting two pieces of one halfpipe
+ * still removes that halfpipe exactly once. */
+export function deleteRows(selection) {
+  const goneByTable = new Map()
+  for (const { table, row } of selection) {
+    if (!TABLES[table]?.includes(row)) continue
+    let gone = goneByTable.get(table)
+    if (!gone) goneByTable.set(table, (gone = new Set()))
+    for (const member of groupOf(table, row)) gone.add(member)
+  }
+  if (!goneByTable.size) return 0
   begin()
-  // A grouped row deletes its whole group: half a halfpipe is not a thing you
-  // ever want, and the four leftovers would still move as a phantom group.
-  const gone = new Set(groupOf(table, row))
-  const keep = TABLES[table].filter((r) => !gone.has(r))
-  TABLES[table].length = 0
-  TABLES[table].push(...keep)
+  let count = 0
+  for (const [table, gone] of goneByTable) {
+    const keep = TABLES[table].filter((r) => !gone.has(r))
+    count += TABLES[table].length - keep.length
+    TABLES[table].length = 0
+    TABLES[table].push(...keep)
+  }
   commit()
   sfxDelete()
+  return count
 }
 
 // ------------------------------------------------------------------- export
@@ -787,6 +1016,7 @@ export function copy(text) {
 export function clearAll() {
   begin()
   for (const arr of Object.values(TABLES)) arr.length = 0
+  BOWL.on = false
   commit()
 }
 
@@ -806,17 +1036,26 @@ export function setSpawn(x, z) {
   commit()
 }
 
-export function toggleBowl() {
+/** Place the one pool entity. Reusing the tool relocates it rather than
+ * creating an impossible second analytic bowl. */
+export function placeBowl(x, z) {
   begin()
-  BOWL.on = !BOWL.on
+  Object.assign(BOWL, { on: true, cx: x, cz: z })
   rekeyBowl()
   commit()
+  sfxPlace(BOWL.depthMid)
 }
 
-/** Move / resize / deepen the pool. Everything it positions — the curved
- *  retaining wall, the four benches facing it — is regenerated, or you drag the
- *  pool away and its furniture stays hugging a hole that isn't there.
- *
+export function deleteBowl() {
+  if (!BOWL.on) return
+  begin()
+  BOWL.on = false
+  rekeyBowl()
+  commit()
+  sfxDelete()
+}
+
+/** Move / resize / deepen the pool.
  *  `underDrag` skips the snapshot: a gizmo drag already pushed one on
  *  dragging-changed, and two snapshots is two undos for one drag. */
 export function setBowl(patch, underDrag = false) {
@@ -826,8 +1065,8 @@ export function setBowl(patch, underDrag = false) {
   commit()
 }
 
-// The regenerated rows are brand new objects, so they arrive without the stable
-// React key every consumer of TABLES assumes.
+// Also strips pool furniture from pre-change saves; the loops remain harmless
+// for current levels, where the pool owns no WALLS or BENCHES rows.
 function rekeyBowl() {
   rebuildBowlDerived()
   for (const r of WALLS) keyOf(r)
@@ -844,6 +1083,7 @@ const levelBlob = () => ({
   bowl: { ...BOWL },
   scene: sceneSnapshot(),
   characters: characterSnapshot(),
+  rules: runRules(),
 })
 
 export function saveLevel() {
@@ -862,6 +1102,31 @@ export const clearSaved = () => store()?.removeItem(KEY)
 // The shipped park, taken BEFORE any save is applied — this is what resetLevel
 // restores to, so it must not see the user's edits.
 const SHIPPED = JSON.stringify(snap())
+
+/** Start the editor as a genuinely new document. This intentionally bypasses
+ * history and autosave: opening Build a Park should not offer the shipped park
+ * (or the last named mode) as an undo step, and the header should read NEW
+ * until the first authored edit is committed. */
+function initializeBlankEditor() {
+  for (const arr of Object.values(TABLES)) arr.length = 0
+  BOWL.on = false
+  setRunRules()
+  clearSaved()
+  past.length = 0
+  future.length = 0
+  useEditor.setState({
+    table: 'SOLIDS',
+    row: null,
+    selection: [],
+    add: null,
+    bowlSel: false,
+    specialSel: null,
+    undoAvailable: false,
+    redoAvailable: false,
+  })
+  resetPlayer()
+  bumpLevel({ persist: false })
+}
 
 /** Apply the saved level, if there is one. Returns whether it did.
  *  A corrupt or stale blob (a table renamed, a hand-edited value) falls back to
@@ -890,12 +1155,44 @@ export function applyBlob(data) {
       // rot/base and would reload straight back into the NaN crash.
       for (const r of rows) TABLES[k].push((keyOf(r), heal(k, r)))
     }
+    rebuildBowlDerived()
+    // The shipped halfpipe existed before grouped editing. Preserve old local
+    // and named saves, but migrate its five stable ids so resizing a legacy
+    // copy cannot pull one transition out of the structure again.
+    const oldHalfpipe = ['hpDeck', 'hpN', 'hpS', 'hpDeckN', 'hpDeckS'].map((id) => SOLIDS.find((r) => r.id === id))
+    if (oldHalfpipe.every(Boolean) && oldHalfpipe.some((r) => !r.grp)) {
+      for (const r of oldHalfpipe) r.grp = 'halfpipe'
+      const wall = oldHalfpipe.find((r) => r.kind === 'ramp')
+      setHalfpipeHeight('SOLIDS', wall, 'y1', Math.max(...oldHalfpipe.filter((r) => r.kind === 'ramp').map((r) => r.y1)))
+    }
+    // Width/length used to edit only the clicked member. Normalize every
+    // grouped halfpipe on load so an already-saved split structure repairs
+    // without requiring the user to find and touch each broken piece again.
+    const normalizedGroups = new Set()
+    for (const r of SOLIDS) {
+      if (!r.grp || normalizedGroups.has(r.grp) || !halfpipeParts('SOLIDS', r)) continue
+      normalizedGroups.add(r.grp)
+      setHalfpipeWidth('SOLIDS', r, 'w', Math.max(...groupOf('SOLIDS', r).map((member) => member.w)))
+      setHalfpipeLength('SOLIDS', r, 'd', dimensionValue('SOLIDS', r, 'd'))
+    }
     if (data.spawn) Object.assign(SPAWN, data.spawn)
     // Older blobs stored just the on/off flag.
     if (typeof data.bowl === 'boolean') BOWL.on = data.bowl
     else if (data.bowl) Object.assign(BOWL, data.bowl)
-    if (data.scene) useSceneSettings.setState(data.scene)
+    if (data.scene) {
+      // Removed editor looks (including the brick pattern) fall back through
+      // the live option tables instead of leaving an invisible stale choice.
+      useSceneSettings.setState({
+        time: timeOf(data.scene.time).id,
+        ground: groundOf(data.scene.ground).id,
+        pattern: patternOf(data.scene.pattern).id,
+      })
+    }
     if (data.characters) applyCharacterSizes(data.characters.dog, data.characters.boy)
+    setRunRules(data.rules)
+    // Named levels are applied after P was created from the shipped spawn.
+    // Re-read the newly applied SPAWN before the start card releases the sim.
+    resetPlayer()
     bumpLevel()
     return true
   } catch {
@@ -910,7 +1207,56 @@ export function applyBlob(data) {
 // one. Each entry carries its own blob + a small jpeg thumbnail data-URL.
 const LEVELS_KEY = 'skatedog.levels'
 
-export function listLevels() {
+// Four lanes of tightly packed 3x3 can bundles, with oversized turn markers.
+// A giant dog running through the middle of a bundle catches the whole pack at
+// once, so the course reads as repeated bursts of destruction instead of a
+// sparse slalom. The serpentine line still fits comfortably inside 30 seconds.
+const trashCans = (() => {
+  const cans = []
+  const xs = [-21, -7, 7, 21]
+  const zs = [18, 8, -2, -12]
+  const packed = [-0.72, 0, 0.72]
+  for (let row = 0; row < zs.length; row++) {
+    const line = row % 2 ? xs.slice().reverse() : xs
+    for (const cx of line) {
+      for (const dx of packed) {
+        for (const dz of packed) {
+          const n = cans.length + 1
+          cans.push({ id: `trash${n}`, x: cx + dx, z: zs[row] + dz, scale: 1 })
+        }
+      }
+    }
+    if (row < zs.length - 1) {
+      const turnX = row % 2 ? -27 : 27
+      cans.push(
+        { id: `trashTurn${row + 1}a`, x: turnX, z: zs[row] - 3, scale: 2.8 },
+        { id: `trashTurn${row + 1}b`, x: turnX, z: zs[row] - 7, scale: 2.8 },
+      )
+    }
+  }
+  cans.push({ id: 'trashFinish', x: -28, z: -12, scale: 3.2 })
+  return cans
+})()
+
+const dogBowlingLevel = {
+  id: 'dog-bowling',
+  name: 'Dog Bowling',
+  builtIn: true,
+  icon: '🎳',
+  description: `30 sec · Bowl over ${trashCans.length} cans`,
+  data: {
+    tables: Object.fromEntries(Object.keys(TABLES).map((table) => [table, table === 'CANS' ? trashCans : []])),
+    spawn: { x: -30, z: 18, heading: Math.PI / 2 },
+    bowl: { ...BOWL, on: false },
+    scene: { time: 'sunset', ground: 'classic', pattern: 'slabs' },
+    // The dog is the bowling ball; the rider stays at the shipped 1.58 size.
+    // Both still go through the size-aware mount and animation paths.
+    characters: { dog: 2.4, boy: 1.58 },
+    rules: { time: 30, goalIds: ['cans'], timeBonus: 0, subtitle: 'Smash every trash can before time runs out' },
+  },
+}
+
+function storedLevels() {
   try {
     return JSON.parse(store()?.getItem(LEVELS_KEY) || '[]')
   } catch {
@@ -918,16 +1264,25 @@ export function listLevels() {
   }
 }
 
+export function listLevels() {
+  return storedLevels()
+}
+
+/** Shipped special modes live beside, never inside, the user's saved parks. */
+export function listChallenges() {
+  return [dogBowlingLevel]
+}
+
 export function saveLevelAs(name, thumb) {
   const entry = { id: Date.now().toString(36), name, at: Date.now(), thumb, data: levelBlob() }
   const write = (list) => store()?.setItem(LEVELS_KEY, JSON.stringify(list))
   try {
-    write([entry, ...listLevels()])
+    write([entry, ...storedLevels()])
     return true
   } catch {
     // quota — the thumbnail is the heavy part, retry without it
     try {
-      write([{ ...entry, thumb: null }, ...listLevels()])
+      write([{ ...entry, thumb: null }, ...storedLevels()])
       return true
     } catch {
       return false
@@ -937,7 +1292,7 @@ export function saveLevelAs(name, thumb) {
 
 export function deleteUserLevel(id) {
   try {
-    store()?.setItem(LEVELS_KEY, JSON.stringify(listLevels().filter((l) => l.id !== id)))
+    store()?.setItem(LEVELS_KEY, JSON.stringify(storedLevels().filter((l) => l.id !== id)))
   } catch {
     // private mode — nothing was saved to delete
   }
@@ -947,14 +1302,15 @@ export function deleteUserLevel(id) {
  *  the DOM panel calls it at save time. Null outside the editor. */
 export const thumbCapture = { fn: null }
 
-// Only under `?edit`. The saved blob is the editor's workbench, not the game:
-// a plain visit is the SHIPPED park, always. (Going to PLAY from inside the
-// editor keeps the edits — setEditing(false) never reloads the level, so a
-// playtest still tests what you just built.)
-// `?level=<id>` is the one other exception: a plain visit that plays a named
-// user level. Applied here, after SHIPPED is snapped, so reset still works.
-if (EDIT) loadLevel()
-else if (typeof location !== 'undefined') {
+// A plain editor visit is always a new blank document. An explicit
+// `/edit?level=<id>` remains available for opening a named park on purpose;
+// ordinary gameplay at `?level=<id>` never leaks into the next editor visit.
+if (EDIT) {
+  const id = typeof location !== 'undefined' && new URLSearchParams(location.search).get('level')
+  const named = id && [...listLevels(), ...listChallenges()].find((level) => level.id === id)
+  if (named) applyBlob(named.data)
+  else initializeBlankEditor()
+} else if (typeof location !== 'undefined') {
   const id = new URLSearchParams(location.search).get('level')
-  if (id) applyBlob(listLevels().find((l) => l.id === id)?.data)
+  if (id) applyBlob([...listLevels(), ...listChallenges()].find((l) => l.id === id)?.data)
 }

@@ -33,7 +33,9 @@ import {
   redo,
   addRow,
   duplicateRow,
-  deleteRow,
+  deleteRows,
+  placeBowl,
+  deleteBowl,
   placementInfo,
   moveGroup,
   rotateGroup,
@@ -42,6 +44,7 @@ import {
   thumbCapture,
 } from '../level/levelEdits.js'
 import { buildRampGeometry } from '../level/parkGeometry.js'
+import { primeAudio } from '../audio/AudioManager.js'
 
 // Only these carry a `rot` field the renderer reads back. Everything else has
 // no yaw to write to, so rotate mode falls back to translate rather than
@@ -54,6 +57,7 @@ const ROTATABLE = new Set(['SOLIDS', 'WALLS', 'PLANTERS', 'BENCHES'])
 // so it gets the handle without being in HAS_Y.
 const HAS_Y = new Set(['BONES', 'LETTERS'])
 const SHOW_Y = new Set(['BONES', 'LETTERS', 'RAILS'])
+const SNAP = 1
 
 // 1..9 arm a TOOL for click-to-place, in the panel's own palette order — one
 // list in levelEdits, so the two can't drift apart. Only the first nine get a
@@ -123,7 +127,7 @@ function proxyOf(table, r) {
 // The cursor ghost shows a SILHOUETTE of the tool, not its bounding box: a
 // wedge tells you what a ramp IS before you commit; the box only told you how
 // much floor it ate. Boxes stay boxes where they are honest (ledges, walls,
-// pickups). Amber = placementInfo has a warning about this spot.
+// pickups). Red = placementInfo rejected this spot.
 const WARN_TINT = '#ff8a66'
 function ghostShapes(toolId) {
   const t = TOOL[toolId]
@@ -150,6 +154,7 @@ function ghostShapes(toolId) {
   if (toolId === 'rail') return [{ geo: new THREE.CylinderGeometry(0.07, 0.07, w, 10), y: 0.55, rz: Math.PI / 2 }]
   if (toolId === 'lamp') return [{ geo: new THREE.CylinderGeometry(0.09, 0.2, 3, 10), y: 1.5 }]
   if (toolId === 'can') return [{ geo: new THREE.CylinderGeometry(0.35, 0.29, 1, 12), y: 0.5 }]
+  if (toolId === 'pool') return [{ geo: new THREE.RingGeometry(BOWL.r0 * 0.78, BOWL.r0, 48), y: 0.025, rx: -Math.PI / 2 }]
   return [{ geo: new THREE.BoxGeometry(w, h, d), y }]
 }
 
@@ -224,7 +229,7 @@ function writeBack(table, row, obj, start, mode) {
   if (HAS_Y.has(table)) row.y = obj.position.y
 }
 
-function RowProxy({ table, row, selected, onTarget, gizmo, armed }) {
+function RowProxy({ table, row, selected, active, onTarget, gizmo, armed }) {
   const ref = useRef(null)
   const [hover, setHover] = useState(false)
   useCursor(hover && !armed)
@@ -232,10 +237,10 @@ function RowProxy({ table, row, selected, onTarget, gizmo, armed }) {
   const p = proxyOf(table, row)
 
   useLayoutEffect(() => {
-    if (!selected) return
+    if (!active) return
     onTarget(ref.current)
     return () => onTarget(null)
-  }, [selected, onTarget])
+  }, [active, onTarget])
 
   const pick = (e) => {
     // The gizmo's handles sit in front of the proxies and three-stdlib's
@@ -244,7 +249,7 @@ function RowProxy({ table, row, selected, onTarget, gizmo, armed }) {
     // hovered, which is exactly the case we must ignore.
     if (gizmo.current?.axis) return
     e.stopPropagation()
-    useEditor.getState().select(table, row)
+    useEditor.getState().select(table, row, e.shiftKey)
   }
 
   return (
@@ -368,7 +373,7 @@ function BowlProxy({ selected, armed, version, onTarget, gizmo }) {
       onPointerDown={(e) => {
         if (gizmo.current?.axis) return
         e.stopPropagation()
-        useEditor.getState().set({ row: null, bowlSel: true, specialSel: null, add: null })
+        useEditor.getState().set({ row: null, selection: [], bowlSel: true, specialSel: null, add: null })
       }}
       onPointerOver={(e) => (e.stopPropagation(), setHover(true))}
       onPointerOut={() => setHover(false)}
@@ -392,8 +397,8 @@ export default function Editor() {
   const version = useLevelVersion()
   const table = useEditor((s) => s.table)
   const row = useEditor((s) => s.row)
+  const selection = useEditor((s) => s.selection)
   const mode = useEditor((s) => s.mode)
-  const snap = useEditor((s) => s.snap)
   const add = useEditor((s) => s.add)
   const addRot = useEditor((s) => s.addRot)
   const bowlSel = useEditor((s) => s.bowlSel)
@@ -410,6 +415,27 @@ export default function Editor() {
   const [space, setSpace] = useState('world')
   const [panning, setPanning] = useState(false)
   const dragStart = useRef(new THREE.Vector3())
+
+  // Creating the first AudioContext can block Chromium for ~150ms. Do it while
+  // the editor's warm-up cover is already visible; the first placement gesture
+  // then only resumes the suspended context and plays its short pop.
+  useEffect(() => { primeAudio() }, [])
+
+  // Centre one authored object without changing the bearing the builder chose.
+  // Letters use this automatically because their editable shape is the glyph,
+  // not the small invisible proxy around it; everything else can still opt in
+  // with F. OrbitControls owns the camera orientation, so update its target and
+  // eye together rather than calling camera.lookAt behind its back.
+  const frameObject = useCallback((object, minDistance = 8) => {
+    const controls = orbit.current
+    if (!object || !controls) return
+    controls.target.copy(object.position)
+    const direction = camera.position.clone().sub(object.position)
+    const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3())
+    direction.setLength(Math.max(minDistance, size.length() * 1.6))
+    camera.position.copy(object.position).add(direction)
+    controls.update()
+  }, [camera])
 
   // Crosshair for the whole viewport while a table is armed. useCursor is
   // drei's, so it unwinds itself — but the belt-and-braces reset below covers
@@ -482,7 +508,7 @@ export default function Editor() {
   const onTarget = useCallback((o) => setTarget(o), [])
 
   // One shared ghost material: groundMove mutates its color (tool tint or
-  // amber) at pointer rate, so it cannot be per-mesh JSX props.
+  // invalid red) at pointer rate, so it cannot be per-mesh JSX props.
   const ghostMat = useMemo(
     () => new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.32, depthWrite: false, color: '#ffe066' }),
     [],
@@ -499,6 +525,13 @@ export default function Editor() {
     camera.position.set(0, 45, 60)
     camera.lookAt(0, 0, 0)
   }, [camera])
+
+  // Selecting an existing letter or placing a new one both make its RowProxy
+  // the target. Bring that target into a close, centred editing view at once;
+  // the real glyph billboards to this camera in Letters.jsx.
+  useLayoutEffect(() => {
+    if (table === 'LETTERS' && row && target) frameObject(target, 10)
+  }, [table, row, target, frameObject])
 
   // The bowl is a radial field — there is no yaw to write, so rotate mode falls
   // back to translate on it as it does for a lamp.
@@ -539,9 +572,9 @@ export default function Editor() {
       // object sideways onto whatever line it happened to be sitting near.
       const s = dragStart.current
       const p = target.position
-      if (p.x !== s.x) p.x = snapAxis(p.x, half[0], lines.xs, snap)
-      if (p.z !== s.z) p.z = snapAxis(p.z, half[1], lines.zs, snap)
-      if (snap && p.y !== s.y) p.y = Math.round(p.y / snap) * snap
+      if (p.x !== s.x) p.x = snapAxis(p.x, half[0], lines.xs, SNAP)
+      if (p.z !== s.z) p.z = snapAxis(p.z, half[1], lines.zs, SNAP)
+      if (p.y !== s.y) p.y = Math.round(p.y / SNAP) * SNAP
     }
 
     const onDrag = (e) => {
@@ -552,8 +585,7 @@ export default function Editor() {
         begin()
       } else if (bowlSel) {
         // underDrag: the drag start already pushed an undo snapshot, and two
-        // is two undos for one drag. Unlike spawn this cannot be a bare field
-        // write — the retaining wall and benches have to be re-derived.
+        // is two undos for one drag.
         setBowl({ cx: target.position.x, cz: target.position.z }, true)
       } else if (spawnSel) {
         // NOT setSpawn(): it opens with its own begin(), and the drag start
@@ -574,7 +606,7 @@ export default function Editor() {
       tc.removeEventListener('dragging-changed', onDrag)
       tc.removeEventListener('objectChange', onMove)
     }
-  }, [target, table, row, gizmoMode, spawnSel, bowlSel, snap, movingHalf])
+  }, [target, table, row, gizmoMode, spawnSel, bowlSel, movingHalf])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -607,6 +639,13 @@ export default function Editor() {
         return
       }
 
+      // V is the neutral picker. It clears every kind of selection and also
+      // disarms placement, matching the explicit Picker button in the panel.
+      if (k === 'v') {
+        st.picker()
+        return
+      }
+
       // R turns whatever you are HOLDING — the armed ghost — in 45s, so a ramp
       // can be aimed before it lands instead of placed and then re-selected.
       // With nothing armed it falls through to the gizmo's rotate mode, which
@@ -628,27 +667,20 @@ export default function Editor() {
         else st.clear()
       } else if (k === 'delete' || k === 'backspace') {
         e.preventDefault() // Backspace is browser-back on some setups
-        if (st.table && st.row) {
-          deleteRow(st.table, st.row)
+        if (st.selection.length) {
+          deleteRows(st.selection)
+          st.clear()
+        } else if (st.bowlSel) {
+          deleteBowl()
           st.clear()
         }
       } else if (k === 'f') {
-        const o = target
-        const c = orbit.current
-        if (!o || !c) return
-        c.target.copy(o.position)
-        // Pull the eye in along the direction it already looks from, so framing
-        // does not also swing the view round to a new bearing.
-        const dir = camera.position.clone().sub(o.position)
-        const size = new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3())
-        dir.setLength(Math.max(8, size.length() * 1.6))
-        camera.position.copy(o.position).add(dir)
-        c.update()
+        frameObject(target)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [camera, target])
+  }, [target, frameObject])
 
   // The ground plane is both the deselect target and the placement surface.
   const groundDown = (e) => {
@@ -657,7 +689,9 @@ export default function Editor() {
     e.stopPropagation()
     const st = useEditor.getState()
     if (!st.add) {
-      st.clear()
+      // Shift-click is additive selection; missing a proxy must not discard
+      // the set the user is still building.
+      if (!e.shiftKey) st.clear()
       return
     }
     // Stay armed: laying down a row of cans should not need nine trips to the
@@ -666,10 +700,16 @@ export default function Editor() {
     // this is the one selection that must survive it.
     const t = st.add
     const [x, z] = placeAt(e.point.x, e.point.z)
-    // The one refusal: a grounded row in the pool stands on air. The ghost is
-    // already amber and the hint line already says why.
+    if (TOOL[t].special === 'pool') {
+      placeBowl(x, z)
+      st.set({ table: null, row: null, selection: [], add: null, bowlSel: true, specialSel: null })
+      return
+    }
+    // The preview is authoritative: every red/warned placement is blocked by
+    // the same placementInfo result that coloured it.
     if (placementInfo(t, x, z, st.addRot).block) return
-    st.set({ table: TOOL[t].table, row: addRow(t, x, z, st.addRot), add: t, bowlSel: false, specialSel: null })
+    const row = addRow(t, x, z, st.addRot)
+    st.set({ table: TOOL[t].table, row, selection: [{ table: TOOL[t].table, row }], add: t, bowlSel: false, specialSel: null })
   }
 
   // Where an armed tool would land: the same grid + flush-face snap the gizmo
@@ -678,7 +718,7 @@ export default function Editor() {
   const placeAt = (px, pz) => {
     const g = TOOL[add].ghost
     const lines = snapLines(null)
-    return [snapAxis(px, g[0] / 2, lines.xs, snap), snapAxis(pz, g[2] / 2, lines.zs, snap)]
+    return [snapAxis(px, g[0] / 2, lines.xs, SNAP), snapAxis(pz, g[2] / 2, lines.zs, SNAP)]
   }
 
   // Ghost follows the pointer by direct mutation — this fires at pointer rate
@@ -712,8 +752,8 @@ export default function Editor() {
         // the slab it does its job (snap reference out on the open ground) and
         // is occluded everywhere the level already gives you a reference.
         position={[0, -0.02, 0]}
-        cellSize={snap || 1}
-        sectionSize={(snap || 1) * 10}
+        cellSize={SNAP}
+        sectionSize={SNAP * 10}
         fadeDistance={55}
         cellColor="#8a86a8"
         sectionColor="#c8b4ff"
@@ -753,14 +793,23 @@ export default function Editor() {
               material={ghostMat}
               raycast={noRaycast}
               position={[0, s.y, s.z ?? 0]}
-              rotation={[0, s.ry ?? 0, s.rz ?? 0]}
+              rotation={[s.rx ?? 0, s.ry ?? 0, s.rz ?? 0]}
             />
           ))}
         </group>
       )}
 
       {rows.map(([t, r]) => (
-        <RowProxy key={keyOf(r)} table={t} row={r} selected={r === row} onTarget={onTarget} gizmo={gizmo} armed={!!add} />
+        <RowProxy
+          key={keyOf(r)}
+          table={t}
+          row={r}
+          selected={selection.some((item) => item.table === t && item.row === r)}
+          active={r === row}
+          onTarget={onTarget}
+          gizmo={gizmo}
+          armed={!!add}
+        />
       ))}
 
       <BowlProxy selected={bowlSel} armed={!!add} version={version} onTarget={onTarget} gizmo={gizmo} />

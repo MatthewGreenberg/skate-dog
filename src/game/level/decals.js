@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { PERIMETER } from './levelData.js'
+import { BOWL, PERIMETER } from './levelData.js'
 import { groundHeightAt } from './colliders.js'
 import { DECAL_COLS } from './textures.js'
 
@@ -157,6 +157,53 @@ export function buildDecalGeometry() {
   for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1
   g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3))
   g.setIndex(idx)
+  return g
+}
+
+// The editor remounts pieces of the park as authored rows change. Decal
+// placement still consults the level once, when the park first appears, so the
+// shipped layout avoids decks and the pool; after that it must be scenery, not
+// a live layout solver. Reusing this geometry keeps every doodle at the same
+// world coordinate while pieces are placed, moved, or deleted.
+let fixedGeometry = null
+export function fixedDecalGeometry() {
+  return (fixedGeometry ??= buildDecalGeometry())
+}
+
+// Return the fixed scatter with whole doodles hidden wherever the current pool
+// could cover them. Bounding circles are deliberately conservative: clipping a
+// chalk dog at the coping looks like it is floating over the water, while
+// hiding the whole mark leaves an ordinary patch of bare concrete. The source
+// geometry is never changed, so moving the pool can only hide/reveal a doodle;
+// it cannot move one.
+export function poolSafeDecalGeometry() {
+  const source = fixedDecalGeometry()
+  const g = source.clone()
+  if (!BOWL.on) return g
+
+  // Each harmonic is bounded by its absolute amplitude, so this is a strict
+  // upper bound for every bearing rather than a sampled approximation.
+  const poolRadius = BOWL.r0 * (1 + BOWL.harmonics.reduce((sum, [amplitude]) => sum + Math.abs(amplitude), 0))
+
+  const pos = source.getAttribute('position')
+  const kept = []
+  const quads = pos.count / 4
+  for (let q = 0; q < quads; q++) {
+    const base = q * 4
+    let cx = 0
+    let cz = 0
+    for (let i = 0; i < 4; i++) {
+      cx += pos.getX(base + i)
+      cz += pos.getZ(base + i)
+    }
+    cx /= 4
+    cz /= 4
+    const halfDiagonal = Math.hypot(pos.getX(base) - cx, pos.getZ(base) - cz)
+    const clear = poolRadius + halfDiagonal
+    if ((cx - BOWL.cx) ** 2 + (cz - BOWL.cz) ** 2 <= clear * clear) continue
+    kept.push(base, base + 2, base + 1, base, base + 3, base + 2)
+  }
+  g.setIndex(kept)
   return g
 }
 

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import * as THREE from 'three'
 import { SPAWN } from './level/levelData.js'
+import { recordCanCount, recordScore } from './highScore.js'
 
 /**
  * UI-facing state only. Anything that changes every frame lives on `P` below
@@ -13,10 +14,36 @@ export const RUN_TIME = 120
 export const TIME_BONUS = 15 // per bone and per challenge
 export const TIME_BAIL = -5 // time is the only resource — there are no lives
 
+// Per-level run rules. Ordinary/editor levels omit them and get the shipped
+// 120-second, all-goals session; built-in challenges can narrow the goal card
+// and clock without forking the game loop.
+const DEFAULT_RUN_RULES = { time: RUN_TIME, goalIds: null, timeBonus: TIME_BONUS, subtitle: null }
+let currentRunRules = { ...DEFAULT_RUN_RULES }
+export const runRules = () => ({ ...currentRunRules, goalIds: currentRunRules.goalIds?.slice() ?? null })
+export const runTime = () => currentRunRules.time
+export const activeGoalIds = () => currentRunRules.goalIds
+export const goalTimeBonus = () => currentRunRules.timeBonus
+
+export function setRunRules(rules) {
+  const time = Number(rules?.time)
+  const timeBonus = Number(rules?.timeBonus)
+  currentRunRules = {
+    time: Number.isFinite(time) && time > 0 ? time : RUN_TIME,
+    goalIds: Array.isArray(rules?.goalIds) ? [...new Set(rules.goalIds.filter((id) => typeof id === 'string'))] : null,
+    timeBonus: Number.isFinite(timeBonus) ? timeBonus : TIME_BONUS,
+    subtitle: typeof rules?.subtitle === 'string' ? rules.subtitle : null,
+  }
+  // A level is applied before play begins. Keep both clock owners aligned now;
+  // restart() repeats the same value for every subsequent attempt.
+  P.timeLeft = currentRunRules.time
+  useGame.setState({ timeLeft: currentRunRules.time, cansSmashed: 0 })
+}
+
 export const useGame = create((set, get) => ({
   score: 0,
   combo: 0,
   bones: 0, // floating bones collected (of levelData BONES)
+  cansSmashed: 0, // live objective progress for can-only challenge levels
   // Whole seconds only. The live clock is P.timeLeft; GameLoop mirrors it here
   // when the displayed second changes, so the HUD renders ~1Hz, not 120Hz.
   timeLeft: RUN_TIME,
@@ -48,6 +75,7 @@ export const useGame = create((set, get) => ({
   clearTrick: () => set({ trickText: '', trickPoints: 0, trickLive: false }),
   setCombo: (combo) => set({ combo }),
   collectBone: () => set({ bones: get().bones + 1 }),
+  smashCan: () => set({ cansSmashed: get().cansSmashed + 1 }),
 
   // ---------------------------------------------------------------- the run
   setTimeLeft: (timeLeft) => set({ timeLeft }),
@@ -58,14 +86,25 @@ export const useGame = create((set, get) => ({
     set({ timeLeft: Math.ceil(P.timeLeft) })
   },
   markGoal: (id) => set({ goalsDone: [...get().goalsDone, id] }),
-  endRun: () => set({ runOver: true }),
+  // The one place a run is finished, so the one place a personal best is
+  // written — PLAY AGAIN goes through restart(), which zeroes the score.
+  endRun: () => {
+    if (currentRunRules.goalIds?.length === 1 && currentRunRules.goalIds[0] === 'cans') {
+      recordCanCount(get().cansSmashed)
+    } else {
+      recordScore(get().score)
+    }
+    set({ runOver: true })
+  },
   restart: () => {
-    P.timeLeft = RUN_TIME
+    const time = runTime()
+    P.timeLeft = time
     set((s) => ({
       score: 0,
       combo: 0,
       bones: 0,
-      timeLeft: RUN_TIME,
+      cansSmashed: 0,
+      timeLeft: time,
       runOver: false,
       goalsDone: [],
       runId: s.runId + 1,

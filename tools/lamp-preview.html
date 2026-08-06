@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- Standalone lamp-post preview for the img2threejs pass reviews.
+     Serve the repo root (python3 -m http.server) and open
+     /tools/lamp-preview.html?stage=0..4 — framing matches the 2:3 reference. -->
+<html>
+<head>
+<meta charset="utf-8" />
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js"}}</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three'
+// dynamic import with a time-stamped URL so module edits are never served from
+// the browser's module cache between screenshots
+const { createLampPostModel, LAMP_TIP_Y } = await import('/src/game/components/lampModel.js?t=' + Date.now())
+
+const stage = parseInt(new URLSearchParams(location.search).get('stage') ?? '4', 10)
+const W = 512, H = 768
+const renderer = new THREE.WebGLRenderer({ antialias: true })
+renderer.setSize(W, H)
+renderer.shadowMap.enabled = true
+document.body.appendChild(renderer.domElement)
+
+const scene = new THREE.Scene()
+scene.background = new THREE.Color(0x000000)
+
+// Studio rig per the spec's lightingFromPhoto: soft key upper-left, cool fill right.
+const key = new THREE.DirectionalLight(0xfff2e0, 2.6)
+key.position.set(-4, 7, 5)
+scene.add(key)
+const fill = new THREE.DirectionalLight(0xbfd4ff, 0.9)
+fill.position.set(5, 3, 4)
+scene.add(fill)
+scene.add(new THREE.AmbientLight(0x606070, 1.6))
+
+scene.add(createLampPostModel({ stage }))
+
+const cam = new THREE.PerspectiveCamera(28, W / H, 0.1, 100)
+const mid = LAMP_TIP_Y * 0.485
+cam.position.set(0, mid, 13.2)
+cam.lookAt(0, mid, 0)
+
+renderer.render(scene, cam)
+window.__previewReady = true
+</script>
+</body>
+</html>

@@ -14,6 +14,8 @@ import { PHOTO, PHOTO_TIME } from '../photo.js'
 import { F, subscribeFoliage, foliageVersion } from '../foliageKnobs.js'
 import { TREES, SHRUBS, PLANTERS, BENCHES, LAMPS } from '../level/levelData.js'
 import { newBuckets, pushTree, pushBush, pushBed, pushBlooms } from '../level/foliage.js'
+import { lampParts, LAMP_LIGHT_Y, LAMP_COLORS } from './lampModel.js'
+import { TOUCH } from '../input.js'
 
 const TAU = Math.PI * 2
 const prng = (seed) => () => ((seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff) / 0x7fffffff)
@@ -146,11 +148,14 @@ const MAT = {
   }),
   iron: new THREE.MeshStandardMaterial({ color: C.benchIron, ...M.paintedMetal }),
   lamp: new THREE.MeshStandardMaterial({ color: C.lamp, ...M.paintedMetal }),
+  // Hex/faceted lamp parts (cage, skirt, roof, plinth) shade flat so the
+  // 6-sided lantern reads as panels, not a smoothed blob.
+  lampFlat: new THREE.MeshStandardMaterial({ color: C.lamp, ...M.paintedMetal, flatShading: true }),
   glass: new THREE.MeshStandardMaterial({
     color: C.lampGlass,
     emissive: new THREE.Color(C.lampGlass),
-    emissiveIntensity: 0.85,
-    roughness: 0.35,
+    emissiveIntensity: 1.15,
+    roughness: 0.9, // opal diffuser, not clear glass
     metalness: 0,
   }),
 }
@@ -519,7 +524,10 @@ function instanceProp(parts, spots) {
     let g = groups.get(key)
     if (!g) groups.set(key, (g = { geo: p.geo, mat: p.mat, local: [], cast: false, receive: false }))
     _o.position.set(...(p.pos || [0, 0, 0]))
-    _o.rotation.set(...(p.rot || [0, 0, 0]))
+    // Pin the order: bake() leaves the shared _o's euler on 'YXZ', and part
+    // rots (lamp mullions especially) are authored as XYZ — applied YXZ they
+    // twist, which read as bent cage bars on every lamp.
+    _o.rotation.set(...(p.rot || [0, 0, 0]), 'XYZ')
     _o.scale.set(...(p.scale || [1, 1, 1]))
     _o.updateMatrix()
     g.local.push(_o.matrix.clone())
@@ -964,10 +972,43 @@ function bannerTexture(kind) {
   })
 }
 
-const BANNER_MAT = {
-  skate: new THREE.MeshStandardMaterial({ map: bannerTexture('skate'), side: THREE.DoubleSide, ...M.cloth }),
-  flower: new THREE.MeshStandardMaterial({ map: bannerTexture('flower'), side: THREE.DoubleSide, ...M.cloth }),
+// Banner cloth: a gentle vertex wave riding the park's shared WIND clock
+// (already photo-pinned), amplitude ramping from zero at the arm to the free
+// hem so the mount never tears off its knob. The fragment half damps POINT
+// lights only: the lamp's own bulb hangs ~1.6m from the print (inverse-square
+// of the distance the ground-spill intensity was tuned at), which bleached the
+// pink print — sun/hemisphere lighting is untouched.
+const bannerShader = (shader) => {
+  shader.uniforms.uTime = WIND.uTime
+  shader.vertexShader = 'uniform float uTime;\n' + shader.vertexShader.replace(
+    '#include <begin_vertex>',
+    `#include <begin_vertex>
+    {
+      float hang = 0.475 - position.y;
+      float ph = 0.0;
+      #ifdef USE_INSTANCING
+        ph = instanceMatrix[3][0] + instanceMatrix[3][2];
+      #endif
+      transformed.z += sin(uTime * 1.7 + position.y * 3.5 + position.x * 4.0 + ph) * 0.09 * hang;
+      transformed.x += sin(uTime * 1.1 + position.y * 2.5 + ph) * 0.032 * hang;
+    }`
+  )
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <lights_fragment_begin>',
+    THREE.ShaderChunk.lights_fragment_begin.replace(
+      'getPointLightInfo( pointLight, geometryPosition, directLight );',
+      'getPointLightInfo( pointLight, geometryPosition, directLight );\n\t\tdirectLight.color *= 0.25;'
+    )
+  )
 }
+
+const bannerMat = (kind) => {
+  const m = new THREE.MeshStandardMaterial({ map: bannerTexture(kind), side: THREE.DoubleSide, ...M.cloth })
+  m.onBeforeCompile = bannerShader
+  return m
+}
+
+const BANNER_MAT = { skate: bannerMat('skate'), flower: bannerMat('flower') }
 
 // Flat plane pushed into a soft S so the cloth reads as hanging, not stamped on.
 const BANNER_GEO = (() => {
@@ -1110,39 +1151,67 @@ export function getMuralTexture(kind) {
 }
 
 // ---------------------------------------------------------------- lamp posts
-const L = {
-  plinth: new THREE.CylinderGeometry(0.3, 0.4, 0.16, 14),
-  swell: new THREE.CylinderGeometry(0.2, 0.3, 0.2, 14),
-  foot: new THREE.CylinderGeometry(0.135, 0.2, 0.3, 14),
-  column: new THREE.CylinderGeometry(0.072, 0.135, 4.2, 14),
-  collar: new THREE.TorusGeometry(0.115, 0.034, 6, 16),
-  neck: new THREE.CylinderGeometry(0.135, 0.085, 0.18, 12),
-  shoulder: new THREE.CylinderGeometry(0.2, 0.135, 0.12, 8),
-  glass: new THREE.CylinderGeometry(0.155, 0.205, 0.44, 8),
-  crown: new THREE.CylinderGeometry(0.1, 0.235, 0.2, 8),
-  finial: new THREE.SphereGeometry(0.075, 10, 8),
-  tip: new THREE.CylinderGeometry(0, 0.05, 0.14, 8),
-  arm: new THREE.CylinderGeometry(0.036, 0.036, 1, 9),
+// The lamp is the teal Victorian post rebuilt from a reference still in
+// lampModel.js (img2threejs pipeline) — hex lantern with corner mullions, ogee
+// roof, spike finial, beaded collars, fluted bell base. This file only maps its
+// material roles onto MAT and instances it like every other prop.
+const LAMP_MAT = { paint: MAT.lamp, paintFlat: MAT.lampFlat, glass: MAT.glass }
+const LAMP_PARTS = lampParts().map((p) => ({ ...p, mat: LAMP_MAT[p.mat] }))
+
+// Worn enamel for the lamp paint: near-white mottle + faint vertical brush
+// streaks multiplied under C.lamp, doubled as a subtle bump so the flat
+// plastic read breaks up. Seeded LCG with imul (see the prng gotcha), not
+// Math.random — captures must stay comparable run to run. Every blotch is
+// drawn wrapped in x because u runs around the shaft's circumference and a
+// seam-crossing blotch otherwise clips into a hard vertical line.
+const lampWear = (() => {
+  let s = 4177
+  const rnd = () => ((s = (Math.imul(s, 1103515245) + 12345) & 0x7fffffff) / 0x80000000)
+  return canvasTexture(128, 256, (g, w, h) => {
+    g.fillStyle = '#f2f2f2'
+    g.fillRect(0, 0, w, h)
+    for (let i = 0; i < 90; i++) {
+      const x = rnd() * w, y = rnd() * h, r = 3 + rnd() * 10
+      const squash = 0.5 + rnd()
+      const v = 226 + Math.floor(rnd() * 29)
+      g.fillStyle = `rgba(${v},${v},${v},0.5)`
+      for (const dx of [-w, 0, w]) {
+        g.beginPath()
+        g.ellipse(x + dx, y, r, r * squash, 0, 0, TAU)
+        g.fill()
+      }
+    }
+    for (let i = 0; i < 40; i++) {
+      const x = rnd() * w
+      const v = 222 + Math.floor(rnd() * 30)
+      g.strokeStyle = `rgba(${v},${v},${v},0.35)`
+      g.lineWidth = 1 + rnd() * 2
+      const y0 = rnd() * h * 0.5, y1 = h * (0.5 + rnd() * 0.5), sway = (rnd() - 0.5) * 6
+      for (const dx of [-w, 0, w]) {
+        g.beginPath()
+        g.moveTo(x + dx, y0)
+        g.lineTo(x + dx + sway, y1)
+        g.stroke()
+      }
+    }
+  })
+})()
+for (const m of [MAT.lamp, MAT.lampFlat]) {
+  m.map = lampWear
+  m.bumpMap = lampWear
+  m.bumpScale = 0.35
 }
 
-const LAMP_PARTS = [
-  { geo: L.plinth, mat: MAT.lamp, pos: [0, 0.08, 0], receive: true },
-  { geo: L.swell, mat: MAT.lamp, pos: [0, 0.26, 0] },
-  { geo: L.foot, mat: MAT.lamp, pos: [0, 0.51, 0] },
-  { geo: L.column, mat: MAT.lamp, pos: [0, 2.76, 0] },
-  { geo: L.collar, mat: MAT.lamp, pos: [0, 2.5, 0], rot: [Math.PI / 2, 0, 0] },
-  { geo: L.neck, mat: MAT.lamp, pos: [0, 4.95, 0] },
-  { geo: L.shoulder, mat: MAT.lamp, pos: [0, 5.1, 0] },
-  { geo: L.glass, mat: MAT.glass, pos: [0, 5.38, 0], cast: false },
-  { geo: L.crown, mat: MAT.lamp, pos: [0, 5.7, 0] },
-  { geo: L.finial, mat: MAT.lamp, pos: [0, 5.85, 0] },
-  { geo: L.tip, mat: MAT.lamp, pos: [0, 5.96, 0] },
-]
+// Banner hardware stayed local: the arms are park furniture, not part of the
+// reference lamp. Mount height 2.86 lands on the shortened shaft's plain run
+// (the post lost 0.7m of column by request; the mount rode down with it).
+const BANNER_ARM = new THREE.CylinderGeometry(0.036, 0.036, 1, 9)
+const BANNER_KNOB = new THREE.SphereGeometry(0.075, 10, 8)
 
 const bannerParts = (side, kind) => [
-  { geo: L.arm, mat: MAT.lamp, pos: [side * 0.36, 3.56, 0], rot: [0, 0, Math.PI / 2], scale: [1, 0.72, 1] },
-  { geo: L.finial, mat: MAT.lamp, pos: [side * 0.72, 3.56, 0], scale: [0.62, 0.62, 0.62] },
-  { geo: BANNER_GEO, mat: BANNER_MAT[kind], pos: [side * 0.4, 3.045, 0], receive: true },
+  { geo: BANNER_ARM, mat: MAT.lamp, pos: [side * 0.36, 2.86, 0], rot: [0, 0, Math.PI / 2], scale: [1, 0.72, 1] },
+  { geo: BANNER_KNOB, mat: MAT.lamp, pos: [side * 0.72, 2.86, 0], scale: [0.62, 0.62, 0.62] },
+  { geo: BANNER_GEO, mat: BANNER_MAT[kind], pos: [side * 0.4, 2.345, 0], receive: true },
 ]
 
 export function LampPosts() {
@@ -1162,5 +1231,24 @@ export function LampPosts() {
     for (const g of groups.values()) out.push(...instanceProp(bannerParts(g.side, g.kind), g.spots))
     return out
   }, [])
-  return <Instanced meshes={meshes} />
+  // The lantern actually emits: one shadowless, distance-limited PointLight per
+  // lamp at the glass centre. Skipped on TOUCH (not on quality — quality starts
+  // 'low' everywhere and inclines, which would pop the lights in mid-run and
+  // keep them out of the shoot harness): 9 extra forward-pass lights is real
+  // per-fragment cost on a phone, and the emissive glass still reads lit.
+  return (
+    <group>
+      <Instanced meshes={meshes} />
+      {!TOUCH && LAMPS.map((l, i) => (
+        <pointLight
+          key={i}
+          position={[l.x, (l.base || 0) + LAMP_LIGHT_Y, l.z]}
+          color={LAMP_COLORS.glow}
+          intensity={60}
+          distance={11}
+          decay={2}
+        />
+      ))}
+    </group>
+  )
 }

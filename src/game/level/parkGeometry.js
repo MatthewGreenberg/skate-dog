@@ -17,8 +17,8 @@ export function buildPlazaGeometry() {
   s.lineTo(P.minX - pad, -(P.maxZ + pad))
   s.closePath()
 
-  // BOWL.on false (editor "delete the bowl") = an unbroken slab. Skatepark
-  // remounts on the level version, so this memo re-runs on the toggle.
+  // BOWL.on false (editor "delete the bowl") = an unbroken slab. Plaza is
+  // keyed on the bowl snapshot, so this memo re-runs on a bowl edit.
   if (BOWL.on) {
     const hole = new THREE.Path()
     const N = 180
@@ -151,4 +151,3 @@ export function buildRampGeometry(w, d, y0, y1, curve, base = 0) {
   g.computeVertexNormals()
   return g
 }
-

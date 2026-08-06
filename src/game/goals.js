@@ -1,4 +1,5 @@
-import { P, useGame, on, emit, TIME_BONUS } from './store.js'
+import { P, useGame, on, emit, activeGoalIds, goalTimeBonus } from './store.js'
+import { CANS } from './level/levelData.js'
 
 /**
  * The run's challenge list — the THPS goal card.
@@ -55,8 +56,16 @@ export const GOALS = [
   { id: 'cans', label: 'Trash Panda', hint: 'smash all five cans', pts: 750 },
 ]
 
-const byId = new Map(GOALS.map((g) => [g.id, g]))
 const done = new Set()
+
+/** The level may narrow the shipped goal card. Return display-ready copies so
+ * the can objective always names the actual number present in this level. */
+export function activeGoals() {
+  const ids = activeGoalIds()
+  return GOALS
+    .filter((g) => !ids || ids.includes(g.id))
+    .map((g) => g.id === 'cans' ? { ...g, hint: `smash all ${CANS.length} cans` } : g)
+}
 
 /**
  * Pay out a challenge. Idempotent — every caller is an event handler that can
@@ -65,12 +74,12 @@ const done = new Set()
  */
 export function complete(id) {
   if (done.has(id)) return false
-  const g = byId.get(id)
+  const g = activeGoals().find((goal) => goal.id === id)
   if (!g) return false
   done.add(id)
   const s = useGame.getState()
   s.addScore(g.pts)
-  s.addTime(TIME_BONUS)
+  s.addTime(goalTimeBonus())
   s.markGoal(id)
   s.showTrick(g.label.toUpperCase(), g.pts)
   emit('goal', { pos: P.pos, id })
@@ -85,7 +94,7 @@ let offs = []
 /** Subscribe the event-driven goals. Safe to call twice — it unsubscribes first. */
 export function initGoals() {
   for (const off of offs) off()
-  offs = GOALS.filter((g) => g.on).map((g) => on(g.on, (p) => g.test(p) && complete(g.id)))
+  offs = activeGoals().filter((g) => g.on).map((g) => on(g.on, (p) => g.test(p) && complete(g.id)))
   return () => {
     for (const off of offs) off()
     offs = []
@@ -103,7 +112,7 @@ export function tickGoals(dt) {
   if (pollT > 0) return
   pollT = POLL
   const score = useGame.getState().score
-  for (const g of GOALS) if (g.score && score >= g.score) complete(g.id)
+  for (const g of activeGoals()) if (g.score && score >= g.score) complete(g.id)
 }
 
 export function resetGoals() {

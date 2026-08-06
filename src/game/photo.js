@@ -57,6 +57,13 @@ export const POSES = {
     fov: 32,
     player: { x: -26.0, y: 0.35, z: 24.5, heading: Math.PI },
   },
+  // lamp head close-up: the teal Victorian lantern (glass glow + point light)
+  lamp: {
+    pos: [-15.6, 4.7, 28.2],
+    look: [-18.5, 3.8, 24.0],
+    fov: 28,
+    player: { x: 0, y: 0, z: 4.0, heading: Math.PI },
+  },
   // deck / stairs / rail architecture
   deck: {
     pos: [10.5, 15.0, 6.0],

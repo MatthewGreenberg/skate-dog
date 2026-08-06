@@ -1,43 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProgress } from '@react-three/drei'
-import { useGame, P } from '../store.js'
-import { GOALS, resetGoals } from '../goals.js'
-import { BONES } from '../level/levelData.js'
+import { useGame, P, runRules } from '../store.js'
+import { activeGoals, resetGoals } from '../goals.js'
+import { BONES, CANS } from '../level/levelData.js'
 import { resetPlayer } from '../player/PlayerController.js'
 import { touch, touchJumpDown, touchJumpUp, TOUCH } from '../input.js'
-import { unlockAudio, setMuted, isMuted } from '../audio/AudioManager.js'
+import { unlockAudio, setMuted, isMuted, setMusicDuck } from '../audio/AudioManager.js'
 import { PHOTO } from '../photo.js'
-import { listLevels, deleteUserLevel } from '../level/levelEdits.js'
+import { EDIT, listChallenges, listLevels, deleteUserLevel } from '../level/levelEdits.js'
+import { bestFor, canBestFor } from '../highScore.js'
 import './ui.css'
 
 const NUM = new Intl.NumberFormat('en-US')
 
-// playing a saved level (`?level=<id>`) — going home is a full navigation on
-// purpose, since the shipped park only loads at module import
-const ON_USER_LEVEL = new URLSearchParams(location.search).has('level')
+// Playing a saved level or built-in challenge (`?level=<id>`) — going home is
+// a full navigation on purpose, since the shipped park loads at module import.
+const ON_NAMED_LEVEL = new URLSearchParams(location.search).has('level')
 
 // Has the loading screen ever finished this page-load? See the useState below.
 let everLoaded = false
 
-function BoneIcon() {
-  // two round lobes at each end joined by a thick bar
-  return (
-    <svg className="hud-bone" viewBox="0 0 44 26" aria-hidden="true">
-      <g fill="#fff">
-        <circle cx="8.4" cy="7.3" r="6.4" />
-        <circle cx="8.4" cy="18.7" r="6.4" />
-        <circle cx="35.6" cy="7.3" r="6.4" />
-        <circle cx="35.6" cy="18.7" r="6.4" />
-        <rect x="7" y="9.4" width="30" height="7.2" rx="3.6" />
-      </g>
-    </svg>
-  )
-}
-
 // four toes + a pad. Rotated outward so it reads as a print, not a flower.
-function PawIcon() {
+function PawIcon({ className = 'hud-paw' }) {
   return (
-    <svg className="hud-paw" viewBox="0 0 29 26" aria-hidden="true">
+    <svg className={className} viewBox="0 0 29 26" aria-hidden="true">
       <ellipse cx="5.5" cy="12" rx="3.1" ry="4.1" transform="rotate(-22 5.5 12)" />
       <ellipse cx="11" cy="7.2" rx="3.2" ry="4.3" transform="rotate(-8 11 7.2)" />
       <ellipse cx="18" cy="7.2" rx="3.2" ry="4.3" transform="rotate(8 18 7.2)" />
@@ -57,6 +43,17 @@ function ClockIcon() {
         <path d="M20.8 6.1l1.7 1.7" />
         <circle cx="13" cy="16.6" r="9.1" />
         <path d="M13 11.6v5h3.9" />
+      </g>
+    </svg>
+  )
+}
+
+function TrashIcon({ className = 'hud-trash' }) {
+  return (
+    <svg className={className} viewBox="0 0 26 28" aria-hidden="true">
+      <g fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 7.5h18M9.5 4h7l1.2 3.5M6.2 7.5l1.2 17h11.2l1.2-17" />
+        <path d="M10.5 11.5v9M15.5 11.5v9" />
       </g>
     </svg>
   )
@@ -100,6 +97,31 @@ function ScorePill() {
   )
 }
 
+function CanPill() {
+  const smashed = useGame((s) => s.cansSmashed)
+  const ref = useRef(null)
+  const previous = useRef(smashed)
+
+  useEffect(() => {
+    if (smashed <= previous.current || !ref.current) {
+      previous.current = smashed
+      return
+    }
+    previous.current = smashed
+    const el = ref.current
+    el.classList.remove('pop')
+    void el.offsetWidth
+    el.classList.add('pop')
+  }, [smashed])
+
+  return (
+    <div className="hud-pill hud-score hud-can-count" ref={ref}>
+      <TrashIcon />
+      <span className="hud-score-value">{smashed}/{CANS.length}</span>
+    </div>
+  )
+}
+
 const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
 // The run clock. The store only holds whole seconds (GameLoop mirrors P.timeLeft
@@ -126,15 +148,29 @@ function TimePill() {
   )
 }
 
+function PlaytestPill({ onExit }) {
+  return (
+    <button className="hud-test-mode" onClick={onExit} aria-label="Return to the level editor">
+      <span className="hud-test-dot" aria-hidden="true" />
+      <span className="hud-test-copy">
+        <strong>TEST LEVEL</strong>
+        <small>Changes stay in the editor</small>
+      </span>
+      <span className="hud-test-key">ESC · RETURN</span>
+    </button>
+  )
+}
+
 // The challenge list. NOT permanent HUD furniture any more — you read it on the
 // start card before the run and behind the ☰ button during it. Eight rows of
 // to-do sat over the park the whole session and nobody reads them while
 // steering; the trick popup already announces each one as it lands.
 function GoalList() {
   const goalsDone = useGame((s) => s.goalsDone)
+  const goals = activeGoals()
   return (
     <div className="hud-goals">
-      {GOALS.map((g) => {
+      {goals.map((g) => {
         const got = goalsDone.includes(g.id)
         return (
           <div className={got ? 'hud-goal is-got' : 'hud-goal'} key={g.id}>
@@ -172,15 +208,23 @@ function GitHubIcon() {
 
 // The in-play menu: a pill that reads as progress until you tap it, then the
 // same list. Opening it PAUSES — P.paused stops the clock and the sim in
-// GameLoop. The unmount path has to clear it too, or ending the run with the
-// sheet open freezes the next one.
+// GameLoop. Duck the soundtrack with it (same 0.3 the editor uses — silence
+// reads as broken audio). The unmount path has to clear both, or ending the
+// run with the sheet open freezes the next one / leaves the music ducked.
 function GoalMenu() {
   const goalsDone = useGame((s) => s.goalsDone)
+  const goals = activeGoals()
   const [open, setOpen] = useState(false)
   useEffect(() => {
     P.paused = open
+    setMusicDuck(open ? 0.3 : 1)
+    // The trick tape sits at 26% of the frame and runs WIDER than the card, so
+    // it prints straight through the sheet. Its fade is a timer the pause stops
+    // feeding, so it would hang there for the whole pause — drop it instead.
+    if (open) useGame.getState().clearTrick()
     return () => {
       P.paused = false
+      setMusicDuck(1)
     }
   }, [open])
   // Esc TOGGLES — it is the only key that opens the sheet, so it can't be
@@ -198,7 +242,7 @@ function GoalMenu() {
         onClick={() => setOpen((v) => !v)}
       >
         <span className="hud-menu-bars" aria-hidden="true" />
-        {goalsDone.length}/{GOALS.length}
+        {goalsDone.length}/{goals.length}
       </button>
       {open && (
         <div className="hud-sheet" onClick={() => setOpen(false)}>
@@ -229,7 +273,7 @@ function GoalMenu() {
                 </a>
               </div>
             </div>
-            <div className="hud-sheet-title">CHALLENGES</div>
+            <div className="hud-sheet-title">GOALS</div>
             <GoalList />
             {/* the wave has no room next to a thumb-sized jump button, so on
                 touch it lives here instead of the bottom-right corner */}
@@ -409,7 +453,7 @@ const LEGEND = TOUCH
     ]
   : [
       ['Space', 'Jump'],
-      ['WASD', 'Move'],
+      ['←↑↓→', 'Move'],
       ['↑', 'Grab'],
       ['↓', 'Dogflip'],
       ['← →', 'Spin'],
@@ -498,18 +542,131 @@ export function LoadingScreen({ progress, editor = false }) {
   )
 }
 
+// Figma-file-card metadata line: coarse buckets are all anyone reads there
+const timeAgo = (t) => {
+  const d = (Date.now() - t) / 1000
+  if (d < 60) return 'Just now'
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`
+  if (d < 86400) return `${Math.floor(d / 3600)}h ago`
+  return `${Math.floor(d / 86400)}d ago`
+}
+
+const isCansOnly = (rules) => rules?.goalIds?.length === 1 && rules.goalIds[0] === 'cans'
+
+function LevelProgress({ level }) {
+  if (isCansOnly(level.data?.rules)) {
+    const total = level.data?.tables?.CANS?.length ?? 0
+    const best = Math.min(canBestFor(level.id), total)
+    const completed = total > 0 && best === total
+    return (
+      <em className={completed ? 'is-complete' : undefined}>
+        {level.at || level.builtIn ? ' · ' : ''}
+        {completed ? '✓ Completed' : 'Not completed'} · {best}/{total} cans
+      </em>
+    )
+  }
+  const best = bestFor(level.id)
+  if (best <= 0) return null
+  return <em>{level.at || level.builtIn ? ' · ' : ''}Best {NUM.format(best)}</em>
+}
+
+function ModeProgress({ level }) {
+  const total = level.data?.tables?.CANS?.length ?? 0
+  const best = Math.min(canBestFor(level.id), total)
+  const completed = total > 0 && best === total
+  const progress = total ? (best / total) * 100 : 0
+  return (
+    <span className={completed ? 'hud-mode-progress is-complete' : 'hud-mode-progress'}>
+      <span>
+        <strong>{completed ? 'Completed' : 'Personal best'}</strong>
+        <b>{best}/{total} cans</b>
+      </span>
+      <span className="hud-mode-progress-track" aria-hidden="true">
+        <i style={{ width: `${progress}%` }} />
+      </span>
+    </span>
+  )
+}
+
+function LevelLibraryPanel({ title, subtitle, levels, setLevels, onClose }) {
+  return (
+    <section className="hud-dock-panel hud-level-panel" aria-label={title}>
+      <div className="hud-level-panel-head">
+        <div>
+          <div className="hud-brief-head">{title}</div>
+          <p className="hud-brief-sub">{subtitle}</p>
+        </div>
+        <button className="hud-level-panel-close" onClick={onClose} aria-label={`Close ${title}`}>✕</button>
+      </div>
+      <div className={levels.every((level) => level.builtIn) ? 'hud-levels is-modes' : 'hud-levels'}>
+        {levels.map((l) => (
+          <div key={l.id} className={l.builtIn ? 'hud-level is-mode' : 'hud-level'}>
+            {/* ?level= applies the saved blob at module load, so playing one
+                is a full navigation for the same reason the builder is */}
+            {l.builtIn ? (
+              <button className="hud-level-go hud-mode-go" onClick={() => { location.href = '/?level=' + l.id }}>
+                <span className="hud-mode-art" aria-hidden="true">
+                  <span className="hud-mode-time">{l.data?.rules?.time ?? 30} SECOND CHALLENGE</span>
+                  <span className="hud-mode-lockup">
+                    <PawIcon className="hud-mode-paw" />
+                    <span>×</span>
+                    <b>{l.icon ?? '🎳'}</b>
+                  </span>
+                  <span className="hud-mode-art-title">DOG<br />BOWLING</span>
+                </span>
+                <span className="hud-mode-content">
+                  <strong className="hud-mode-title">{l.name}</strong>
+                  <span className="hud-mode-description">{l.data?.rules?.subtitle ?? l.description}</span>
+                  <ModeProgress level={l} />
+                  <span className="hud-mode-cta">PLAY MODE <b>→</b></span>
+                </span>
+              </button>
+            ) : (
+              <button className="hud-level-go" onClick={() => { location.href = '/?level=' + l.id }}>
+                {l.thumb ? <img src={l.thumb} alt="" /> : <span className="hud-level-blank">{l.icon ?? '🛹'}</span>}
+                <span className="hud-level-cap">
+                  <b>{l.name}</b>
+                  <i>
+                    {l.at ? `Edited ${timeAgo(l.at)}` : ''}
+                    <LevelProgress level={l} />
+                  </i>
+                </span>
+              </button>
+            )}
+            {!l.builtIn && (
+              <button
+                className="hud-level-x"
+                title="Delete level"
+                onClick={() => {
+                  if (!window.confirm(`Delete "${l.name}"?`)) return
+                  deleteUserLevel(l.id)
+                  setLevels?.(listLevels())
+                }}
+              >✕</button>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function StartOverlay() {
   // The card exits on click while `started` is already flipping, so the DOM
   // fade and the 3D reveal are the same 0.26s. Unmount comes free: GameUI drops
   // the overlay the moment start() lands.
   const [out, setOut] = useState(false)
-  // The eight rows are COLLAPSED by default: on the start card they compete with
+  // The goal rows are COLLAPSED by default: on the start card they compete with
   // the title for the same half of the frame, and the count is the only part you
   // read before you've played once.
   const [showGoals, setShowGoals] = useState(false)
-  const [showLevels, setShowLevels] = useState(false)
+  const [libraryPanel, setLibraryPanel] = useState(null) // 'challenges' | 'levels'
   const [levels, setLevels] = useState(listLevels)
+  const [challenges] = useState(listChallenges)
   const goalsDone = useGame((s) => s.goalsDone)
+  const goals = activeGoals()
+  const rules = runRules()
+  const goalProgress = goals.length ? (goalsDone.length / goals.length) * 100 : 0
   const onPlay = () => {
     if (out) return
     setOut(true)
@@ -519,8 +676,9 @@ function StartOverlay() {
   useEffect(() => {
     const key = (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
-        // a focused LEVEL BUILDER / MY LEVELS control keeps its own activation
-        if (e.target.closest?.('.hud-doors, .hud-levels')) return
+        // Interactive controls keep their own keyboard activation. The global
+        // shortcut only starts a run when focus is on the page itself.
+        if (e.target.closest?.('button, a')) return
         e.preventDefault()
         onPlay()
       }
@@ -529,79 +687,97 @@ function StartOverlay() {
     return () => removeEventListener('keydown', key)
   })
   return (
-    <div className={out ? 'hud-start is-out' : 'hud-start'}>
-      {/* the SKATE DOG title is troika text in the scene, upper LEFT — Intro.jsx
-          places it in camera space, so this card owns the upper right */}
-      <div className="hud-brief">
-        <div className="hud-brief-head">CHALLENGES</div>
-        <p className="hud-brief-sub">Complete tricks and explore the park</p>
-        <div className="hud-brief-count">
-          <StarIcon className="hud-brief-star" />
-          <b>
-            {goalsDone.length} / {GOALS.length}
-          </b>
-          completed
-        </div>
-        <button className="hud-brief-more" onClick={() => setShowGoals((v) => !v)}>
-          {showGoals ? 'Hide challenges' : 'View challenges'}
-          <span className={showGoals ? 'is-open' : undefined}>›</span>
-        </button>
-        {showGoals && <GoalList />}
-      </div>
-      <button className="hud-play" onClick={onPlay}>
-        <StarIcon className="hud-play-star" />
-        PLAY
-        <StarIcon className="hud-play-star" />
-      </button>
-      <span className="hud-hint">or press Enter</span>
-      {/* full navigation on purpose: EDIT is a module-load const and
-          loadLevel/setMusicDuck only run at import under /edit */}
-      <div className="hud-doors">
-        <button className="hud-build" onClick={() => { location.href = '/edit' }}>
-          🛠️ LEVEL BUILDER
-        </button>
-        {ON_USER_LEVEL && (
-          <button className="hud-build" onClick={() => { location.href = '/' }}>
-            HOME
-          </button>
+    <div className={out ? 'hud-start is-out' : 'hud-start'} aria-labelledby="skate-dog-title">
+      <h1 className="hud-sr-only" id="skate-dog-title">Skate Dog</h1>
+      <div className={`hud-start-dock${showGoals || libraryPanel ? ' is-expanded' : ''}`}>
+        {showGoals && (
+          <section className="hud-dock-panel" aria-label="Run goals">
+            <div className="hud-level-panel-head">
+              <div>
+                <div className="hud-brief-head">Run goals</div>
+                <p className="hud-brief-sub">{rules.subtitle ?? 'Complete tricks and explore the park'}</p>
+              </div>
+              <button className="hud-level-panel-close" onClick={() => setShowGoals(false)} aria-label="Close run goals">✕</button>
+            </div>
+            <GoalList />
+          </section>
         )}
-        {levels.length > 0 && (
-          <button className="hud-build" onClick={() => setShowLevels((v) => !v)}>
-            🏞️ MY LEVELS ({levels.length})
-          </button>
+        {libraryPanel && (
+          <LevelLibraryPanel
+            title={libraryPanel === 'challenges' ? 'GAME MODES' : 'MY PARKS'}
+            subtitle={libraryPanel === 'challenges' ? 'Special runs with their own rules and goals.' : 'Your saved skateparks.'}
+            levels={libraryPanel === 'challenges' ? challenges : levels}
+            setLevels={libraryPanel === 'levels' ? setLevels : null}
+            onClose={() => setLibraryPanel(null)}
+          />
         )}
-      </div>
-      {showLevels && (
-        <div className="hud-levels">
-          {levels.map((l) => (
-            <div key={l.id} className="hud-level">
-              {/* ?level= applies the saved blob at module load, so playing one
-                  is a full navigation for the same reason the builder is */}
-              <button className="hud-level-go" onClick={() => { location.href = '/?level=' + l.id }}>
-                {l.thumb ? <img src={l.thumb} alt="" /> : <span className="hud-level-blank">🛹</span>}
-                <b>{l.name}</b>
+        <div className="hud-start-top">
+          <button className="hud-play" onClick={onPlay}>
+            <span className="hud-play-badge"><StarIcon className="hud-play-star" /></span>
+            <span className="hud-play-copy">
+              <strong>PLAY NOW</strong>
+              <small>Start your run</small>
+            </span>
+            <span className="hud-play-key">ENTER ↵</span>
+          </button>
+          <button
+            className={showGoals ? 'hud-dynamic-status is-open' : 'hud-dynamic-status'}
+            onClick={() => {
+              setLibraryPanel(null)
+              setShowGoals((value) => !value)
+            }}
+            aria-expanded={showGoals}
+          >
+            <span className="hud-dynamic-icon"><StarIcon className="hud-brief-star" /></span>
+            <span className="hud-dynamic-copy">
+              <small>RUN GOALS</small>
+              <strong>{goalsDone.length} of {goals.length} complete</strong>
+              <span className="hud-dynamic-track" aria-hidden="true">
+                <i style={{ width: `${goalProgress}%` }} />
+              </span>
+            </span>
+            <span className="hud-dynamic-chevron" aria-hidden="true">⌃</span>
+          </button>
+          {/* full navigation on purpose: EDIT is a module-load const and
+              loadLevel/setMusicDuck only run at import under /edit */}
+          <nav className="hud-doors" aria-label="More ways to play">
+            <span className="hud-doors-label">EXPLORE</span>
+            <div className="hud-door-row">
+              <button className="hud-build" onClick={() => { location.href = '/edit' }}>
+                <span aria-hidden="true">🛠️</span> BUILD A PARK <span className="hud-beta">BETA</span>
               </button>
-              <button
-                className="hud-level-x"
-                title="Delete level"
-                onClick={() => {
-                  if (!window.confirm(`Delete "${l.name}"?`)) return
-                  deleteUserLevel(l.id)
-                  setLevels(listLevels())
-                }}
-              >✕</button>
+              {ON_NAMED_LEVEL && (
+                <button className="hud-build" onClick={() => { location.href = '/' }}>
+                  HOME
+                </button>
+              )}
+              <button className="hud-build" onClick={() => {
+                setShowGoals(false)
+                setLibraryPanel((value) => value === 'challenges' ? null : 'challenges')
+              }}>
+                <span aria-hidden="true">🏆</span> MODES <span className="hud-door-count">{challenges.length}</span>
+              </button>
+              {levels.length > 0 && (
+                <button className="hud-build" onClick={() => {
+                  setShowGoals(false)
+                  setLibraryPanel((value) => value === 'levels' ? null : 'levels')
+                }}>
+                  <span aria-hidden="true">🏞️</span> MY PARKS <span className="hud-door-count">{levels.length}</span>
+                </button>
+              )}
+            </div>
+          </nav>
+        </div>
+        <div className="hud-legend" aria-label="Game controls">
+          <span className="hud-legend-label">CONTROLS</span>
+          {LEGEND.map(([key, what]) => (
+            <div key={key}>
+              <span>{what}</span>
+              <b>{key}</b>
             </div>
           ))}
+          <div className="hud-hint"><b>ENTER</b><span>Quick start</span></div>
         </div>
-      )}
-      <div className="hud-legend">
-        {LEGEND.map(([key, what]) => (
-          <div key={key}>
-            <b>{key}</b>
-            <i>=</i>
-            {what}
-          </div>
-        ))}
       </div>
     </div>
   )
@@ -611,7 +787,11 @@ function StartOverlay() {
 function RunOver() {
   const score = useGame((s) => s.score)
   const bones = useGame((s) => s.bones)
+  const cansSmashed = useGame((s) => s.cansSmashed)
   const goalsDone = useGame((s) => s.goalsDone)
+  const goals = activeGoals()
+  const cansOnly = runRules().goalIds?.length === 1 && runRules().goalIds[0] === 'cans'
+  const wonCanRun = cansOnly && cansSmashed === CANS.length
   const [out, setOut] = useState(false)
   const again = () => {
     if (out) return
@@ -623,40 +803,53 @@ function RunOver() {
     resetGoals()
     setTimeout(() => useGame.getState().restart(), 200)
   }
-  useEffect(() => {
-    const key = (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        again()
-      }
-    }
-    addEventListener('keydown', key)
-    return () => removeEventListener('keydown', key)
-  })
+  // ponytail: no key shortcut here on purpose — a run ends with a key still
+  // held or tapped and restarting has to be a deliberate click.
   return (
-    <div className={out ? 'hud-over is-out' : 'hud-over'}>
-      <div className="hud-over-title">TIME</div>
-      <div className="hud-over-score">{NUM.format(score)}</div>
-      <div className="hud-over-rows">
-        <div>
-          <b>{bones}/{BONES.length}</b>bones
-        </div>
-        <div>
-          <b>
-            {goalsDone.length}/{GOALS.length}
-          </b>
-          challenges
-        </div>
+    <div className={`hud-over${wonCanRun ? ' is-win' : ''}${out ? ' is-out' : ''}`}>
+      {cansOnly ? (
+        <>
+          {wonCanRun && <div className="hud-over-win-kicker">🏆 DOG BOWLING CHAMPION 🏆</div>}
+          <div className="hud-over-title hud-over-can-title">
+            {wonCanRun ? 'YOU WON!' : <><TrashIcon /> CANS SMASHED</>}
+          </div>
+          <div className="hud-over-score">{cansSmashed}/{CANS.length}</div>
+          <div className="hud-over-rows">
+            {wonCanRun
+              ? <div className="hud-over-win-copy"><b>TOTAL DESTRUCTION!</b></div>
+              : <div><b>{Math.max(0, CANS.length - cansSmashed)}</b>left standing</div>}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="hud-over-title">TIME</div>
+          <div className="hud-over-score">{NUM.format(score)}</div>
+          <div className="hud-over-rows">
+            {BONES.length > 0 && <div><b>{bones}/{BONES.length}</b>bones</div>}
+            <div>
+              <b>
+                {goalsDone.length}/{goals.length}
+              </b>
+              challenges
+            </div>
+          </div>
+        </>
+      )}
+      <div className="hud-over-actions">
+        <button className="hud-play" onClick={again}>
+          PLAY AGAIN
+        </button>
+        {ON_NAMED_LEVEL && (
+          <button className="hud-build hud-over-home" onClick={() => { location.href = '/' }}>
+            GO HOME
+          </button>
+        )}
       </div>
-      <button className="hud-play" onClick={again}>
-        PLAY AGAIN
-      </button>
-      <span className="hud-hint">or press Enter</span>
     </div>
   )
 }
 
-export default function GameUI() {
+export default function GameUI({ onExitTest } = {}) {
   const started = useGame((s) => s.started)
   const warmedUp = useGame((s) => s.warmedUp)
   const { progress } = useProgress()
@@ -689,16 +882,18 @@ export default function GameUI() {
   }, [])
   const live = started || !!PHOTO
   const runOver = useGame((s) => s.runOver)
+  const cansOnly = runRules().goalIds?.length === 1 && runRules().goalIds[0] === 'cans'
   return (
     <div className="hud">
       <div className={live ? 'hud-widgets' : 'hud-widgets is-idle'}>
-        <ScorePill />
+        {cansOnly ? <CanPill /> : <ScorePill />}
         {/* clock and goal card are session furniture — PHOTO fakes a session
             for the HUD, but the reference captures are framed against the old
             widget row and must not grow one */}
-        {!PHOTO && <TimePill />}
+        {!PHOTO && !EDIT && <TimePill />}
+        {live && EDIT && !runOver && <PlaytestPill onExit={onExitTest} />}
         {live && !TOUCH && <MuteWave />}
-        {live && !PHOTO && !runOver && <GoalMenu />}
+        {live && !PHOTO && !EDIT && !runOver && <GoalMenu />}
       </div>
       <TrickPopup />
       {live && TOUCH && !runOver && (

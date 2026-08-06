@@ -1,6 +1,7 @@
 // Fully synthesised SFX (oscillators + noise buffers) plus a three-track
-// soundtrack from public/songs. Inert until unlockAudio() runs from a user
-// gesture — nothing here touches AudioContext at import time.
+// soundtrack from public/songs. Nothing touches AudioContext at import time;
+// the editor may prime a suspended context during its covered warm-up, while
+// unlockAudio() still resumes it from a user gesture.
 
 import { P, on } from '../store.js'
 
@@ -358,11 +359,19 @@ export function sfxPlace(h = 1) {
   o.frequency.exponentialRampToValueAtTime(hz * 0.45, t + 0.11)
   env(v.g.gain, t, 0.3, 0.008, 0.16)
   o.connect(v.g); o.start(t); o.stop(t + 0.2)
-  const s = noise(false, false), f = flt('highpass', 2400), ng = gn(0)
-  env(ng.gain, t, 0.05, 0.004, 0.05)
-  s.connect(f); f.connect(ng); ng.connect(v.g)
-  s.start(t, Math.random() * 2); s.stop(t + 0.08)
-  v.add(o, s, f, ng)
+  // The long noise buffers are built when play-test starts, under its mode
+  // cover. Building them on the first placement gesture blocks the editor for
+  // ~160ms just to add this tiny click layer; the oscillator pop stands alone
+  // until those buffers already exist.
+  if (whiteBuf) {
+    const s = noise(false, false), f = flt('highpass', 2400), ng = gn(0)
+    env(ng.gain, t, 0.05, 0.004, 0.05)
+    s.connect(f); f.connect(ng); ng.connect(v.g)
+    s.start(t, Math.random() * 2); s.stop(t + 0.08)
+    v.add(o, s, f, ng)
+  } else {
+    v.add(o)
+  }
 }
 
 export function sfxDelete() {
@@ -375,20 +384,23 @@ export function sfxDelete() {
   o.frequency.exponentialRampToValueAtTime(70, t + 0.16)
   env(v.g.gain, t, 0.24, 0.006, 0.2)
   o.connect(v.g); o.start(t); o.stop(t + 0.26)
-  const s = noise(true, false), f = flt('lowpass', 700), ng = gn(0)
-  env(ng.gain, t, 0.1, 0.005, 0.1)
-  s.connect(f); f.connect(ng); ng.connect(v.g)
-  s.start(t, Math.random() * 2); s.stop(t + 0.16)
-  v.add(o, s, f, ng)
+  if (pinkBuf) {
+    const s = noise(true, false), f = flt('lowpass', 700), ng = gn(0)
+    env(ng.gain, t, 0.1, 0.005, 0.1)
+    s.connect(f); f.connect(ng); ng.connect(v.g)
+    s.start(t, Math.random() * 2); s.stop(t + 0.16)
+    v.add(o, s, f, ng)
+  } else {
+    v.add(o)
+  }
 }
 
 // ------------------------------------------------------------------- public
-export function unlockAudio() {
+export function primeAudio() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext
     if (!AC) return
     ctx = new AC()
-    ensureNoise()
     master = gn(muted ? 0 : MASTER)
     const comp = ctx.createDynamicsCompressor()
     comp.threshold.value = -18; comp.knee.value = 26; comp.ratio.value = 3
@@ -396,6 +408,11 @@ export function unlockAudio() {
     master.connect(comp)
     comp.connect(ctx.destination)
   }
+}
+
+export function unlockAudio() {
+  primeAudio()
+  if (!ctx) return
   if (ctx.state === 'suspended') ctx.resume().catch(() => { /* gesture not accepted */ })
 }
 
@@ -403,6 +420,9 @@ export function startAudio() {
   if (started) return
   if (!ctx) unlockAudio()
   if (!ctx) return
+  // This is the expensive part of audio startup. In editor play-test it runs
+  // behind the mode transition instead of inside the first placement click.
+  if (!whiteBuf || !pinkBuf) ensureNoise()
   started = true
   const t = ctx.currentTime
 
@@ -471,6 +491,16 @@ export function updateAudio(dt) {
   breezeLP.frequency.setTargetAtTime(cut, t, 0.5)
   breezeGain.gain.setTargetAtTime(0.035 * (0.72 + 0.28 * Math.sin(breezePhase * 0.61)), t, 0.6)
 
+  // Pause freezes P (speed, grind state) but leaves the continuous loops running
+  // off those latched values — hush roll/grind so a mid-rail Esc isn't a held
+  // spark whoosh. Breeze stays: park atmosphere under the ducked soundtrack.
+  // grindGain is event-edged, so restoring it on unpause has to live here.
+  if (P.paused) {
+    rollGain.gain.setTargetAtTime(0, t, 0.05)
+    grindGain.gain.setTargetAtTime(0, t, 0.05)
+    return
+  }
+
   birdTimer -= d
   if (birdTimer <= 0) { birdTimer = 6 + Math.random() * 8; chirp() }
 
@@ -482,6 +512,7 @@ export function updateAudio(dt) {
   rollBP.frequency.setTargetAtTime(Math.min(5200, (260 + sp * 46) * r[0]), t, 0.09)
 
   if (grinding) {
+    grindGain.gain.setTargetAtTime(0.16, t, 0.05)
     grindBP.frequency.setTargetAtTime(Math.min(6500, 1700 + sp * 200), t, 0.12)
     grindLevel.gain.setTargetAtTime(0.5 + Math.min(0.6, sp / 14), t, 0.15)
   }

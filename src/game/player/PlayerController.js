@@ -8,6 +8,7 @@ import { input, consumeJump, applyTouchStick, TOUCH } from '../input.js'
 import { sampleSurface, resolveCollision } from '../level/colliders.js'
 import { findGrind, railAt, PATHS } from '../level/rails.js'
 import { SPAWN, BOWL, bowlRadius } from '../level/levelData.js'
+import { bowlHeight, isInsideBowl } from '../level/bowlGeometry.js'
 import { dogLength } from '../components/dogFit.js'
 
 // ------------------------------------------------------------------ tuning
@@ -15,6 +16,10 @@ const STEP = 1 / 120
 const MAX_STEPS = 10
 
 const G = 22
+// Grounded gravity gets a small arcade lift so a visible drop produces a
+// visible speed change within a short ramp. This only multiplies the component
+// parallel to the surface; airborne jump timing still uses G exactly.
+const SLOPE_GRAVITY = 1.25
 // Mobile rides ~30% slower: the same speed reads much faster on a small screen
 // with a thumb stick, and overspeed drag above the lower cap curbs the
 // gravity-built bowl speed too. CLEAN_CAP and the turn-rate blend are both
@@ -24,9 +29,11 @@ const MAX_SPEED = 13 * SPEED_K
 const ACCEL = 13 * SPEED_K
 const REVERSE_ACCEL = 5
 const DEFAULT_DOG_LENGTH = 1.12 * 1.16 * 1.58
-// Keep the dog's pace constant in body-lengths per second. This is live rather
-// than captured at load because the editor can resize the character in place.
-const movementScale = () => dogLength() / DEFAULT_DOG_LENGTH
+// Larger dogs need more world speed to avoid feeling lumbering, but a perfectly
+// linear scale made the biggest setting too fast. The softened curve keeps the
+// size response noticeable without turning the top end into a rocket. This is
+// live rather than captured at load because the editor resizes in place.
+const movementScale = () => Math.pow(dogLength() / DEFAULT_DOG_LENGTH, 0.7)
 // Transition pump, as a multiplier on ACCEL per unit of surface curvature
 // (a 1.6m/2.4m quarter is 0.385, so this peaks near 1.2x ACCEL at low speed).
 const PUMP = 3.2
@@ -275,10 +282,12 @@ function stepGround(dt) {
     P.vel.addScaledVector(f, accel * pump * dir * dt)
   }
 
-  // gravity along the surface — this is what builds speed in the bowl
+  // Gravity along the surface — downhill adds speed and uphill spends it. The
+  // mild grounded-only lift makes short park ramps read as actual drops rather
+  // than being swallowed by steering and rolling losses.
   tmp.copy(n).multiplyScalar(G * n.y)
   tmp.y -= G
-  P.vel.addScaledVector(tmp, dt)
+  P.vel.addScaledVector(tmp, SLOPE_GRAVITY * dt)
 
   // tangential velocity handling
   tmp.copy(P.vel).addScaledVector(n, -P.vel.dot(n))
@@ -302,7 +311,10 @@ function stepGround(dt) {
   }
 
   // drag + soft speed cap (gravity may still push past it in the bowl)
-  let drag = ROLL_DRAG
+  // Rolling resistance follows normal force: full on flat ground, small on a
+  // steep wall. Applying flatground drag unchanged on a near-vertical
+  // halfpipe was bleeding away most of the gravity the descent just earned.
+  let drag = ROLL_DRAG * Math.max(0.15, n.y)
   if (tSpeed > maxSpeed) drag += OVERSPEED_DRAG * (tSpeed - maxSpeed) / sizeK
   tmp.multiplyScalar(1 / (1 + drag * dt))
 
@@ -312,6 +324,7 @@ function stepGround(dt) {
   const prevY = P.pos.y
   P.pos.addScaledVector(P.vel, dt)
   if (resolveCollision(P.pos, prevY, RADIUS, push)) slideAlongWall(dt)
+  clampToBowl()
 
   sampleSurface(P.pos.x, P.pos.z, prevY, surf)
   const gap = P.pos.y - surf.y
@@ -622,6 +635,7 @@ function stepAir(dt) {
 
   P.pos.addScaledVector(P.vel, dt)
   if (resolveCollision(P.pos, P.pos.y, RADIUS, push)) slideAlongWall(dt)
+  clampToBowl()
 
   // late jump off a ledge
   coyote -= dt
@@ -847,7 +861,26 @@ function exitGrind(speed, natural) {
   }
 }
 
+// The bowl is a HOLE with no side walls — resolveCollision only ever pushes in
+// x/z, so any path that puts the body under the dish (a fast entry between
+// substeps, a graze off the transition, a landing sampled a frame late) leaves
+// it under there with nothing to push it back out. One clamp on the same
+// analytic surface the mesh is drawn from covers every path.
+function clampToBowl() {
+  if (!BOWL.on || !isInsideBowl(P.pos.x, P.pos.z)) return
+  // Position only: the callers' own ground-snap / land branches reproject the
+  // velocity along the surface right after this. Zeroing vel.y here instead
+  // ate the descent's momentum on any substep that overshot, and a coarse dt
+  // then rode the bowl completely differently (collision.check dt/divergence).
+  const y = bowlHeight(P.pos.x, P.pos.z)
+  if (P.pos.y < y) P.pos.y = y
+}
+
 // ------------------------------------------------------------------ bail
+// How far the tumbling body is held off the surface — roughly the fitted dog's
+// half-height, since the wipeout rolls it about the paw line.
+const BAIL_CLEAR = 0.4
+
 function bail() {
   P.state = 'bail'
   P.grounded = false
@@ -871,9 +904,15 @@ function stepBail(dt) {
   P.pos.addScaledVector(P.vel, dt)
   P.dogRoll += 5 * dt
   P.dogPitch += 3 * dt
+  clampToBowl()
   sampleSurface(P.pos.x, P.pos.z, 1e6, surf)
-  if (P.pos.y < surf.y) {
-    P.pos.y = surf.y
+  // P.pos is the rig's PAW line, and the wipeout tumbles the whole body about
+  // it — at surf.y exactly, half the dog is under the paving for most of the
+  // roll. Hold it a body radius clear instead (the tumble is 1.25s and ends in
+  // a respawn, so a lying-still dog reading a touch high is never seen).
+  const floor = surf.y + BAIL_CLEAR
+  if (P.pos.y < floor) {
+    P.pos.y = floor
     P.vel.set(0, 0, 0)
   }
   if (P.respawnTimer <= 0) {

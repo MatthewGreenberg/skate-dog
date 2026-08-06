@@ -2,7 +2,7 @@
 // grinding is just "advance s along the path" — no physics, no jitter.
 
 import * as THREE from 'three'
-import { RAILS, WALLS, PLANTERS } from './levelData.js'
+import { RAILS, WALLS, PLANTERS, BENCHES, wallSegments } from './levelData.js'
 
 // ---------------------------------------------------------------- lip edges
 // Every wall cap and planter rim is grindable. These are derived, not authored:
@@ -19,7 +19,9 @@ const RIM_OUT = 0.12
 
 function lipEdges() {
   const out = []
-  WALLS.forEach((w, i) => {
+  // A bent wall is one row drawn as a chain of chords, so its lip is that
+  // chain's lips — read it through the same expansion the renderer does.
+  WALLS.flatMap(wallSegments).forEach((w, i) => {
     // levelData yaws local +Z to (sin rot, cos rot), so local +X is
     // (cos rot, -sin rot). Both top EDGES, not the centreline: you grind the
     // lip with the dog's side hanging over the face, the way a board does.
@@ -27,7 +29,10 @@ function lipEdges() {
     // ~1.1 apart, so each edge is comfortably the nearest one from its own
     // side and they never fight over a lock-on.
     const alongZ = w.d >= w.w
-    const half = (alongZ ? w.d : w.w) / 2 - TRIM
+    // A chord of a bent wall has neighbours, not corners, so it takes no trim
+    // — at TRIM a 1.3m segment would fall under the 0.5 stub test below and a
+    // bent wall would silently stop being grindable.
+    const half = (alongZ ? w.d : w.w) / 2 - (w.seg ? 0 : TRIM)
     if (half < 0.5) return // a stub cap (the deck-front dividers) is not a line
     const c = Math.cos(w.rot)
     const s = Math.sin(w.rot)
@@ -81,6 +86,28 @@ function lipEdges() {
         ],
       })
     }
+  })
+  // A bench is a grind too, and only along the FRONT edge of the seat: the
+  // back edge is under the backrest slats, so a path there grinds the dog
+  // through them. Props draws the seat slats at y 0.415 (0.095 thick, so the
+  // top is 0.4625) spanning local z -0.26..0.25 with 0.17 depth, 1.72 long
+  // along local x. TRIM is only 0.15 here — at 0.35 a 1.72m seat leaves a
+  // metre, which is barely a lock-on at 13 m/s.
+  BENCHES.forEach((b, i) => {
+    const rot = b.rot || 0
+    const c = Math.cos(rot)
+    const s = Math.sin(rot)
+    // local +Z is the seat FRONT -> (sin, cos); local +X -> (cos, -sin)
+    const off = 0.25 + 0.17 / 2 - EDGE_IN
+    const half = 1.72 / 2 - 0.15
+    const y = (b.base || 0) + 0.415 + 0.095 / 2
+    out.push({
+      id: `bench${i}`,
+      pts: [
+        [b.x + s * off - c * half, y, b.z + c * off + s * half],
+        [b.x + s * off + c * half, y, b.z + c * off - s * half],
+      ],
+    })
   })
   return out
 }

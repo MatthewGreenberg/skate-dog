@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useProgress } from '@react-three/drei'
@@ -13,9 +13,10 @@ import { updatePlayer } from '../player/PlayerController.js'
 import { initGoals, tickGoals } from '../goals.js'
 import { startAudio, updateAudio } from '../audio/AudioManager.js'
 import { PHOTO, tickPhotoReady } from '../photo.js'
+import { BONES as BONE_ROWS, LETTERS as LETTER_ROWS, CANS as CAN_ROWS } from '../level/levelData.js'
 
 import Lighting from './Lighting.jsx'
-import Skatepark from './Skatepark.jsx'
+import Skatepark, { BowlProbe } from './Skatepark.jsx'
 import Player from './Player.jsx'
 import Effects from './Effects.jsx'
 import Bones from './Bones.jsx'
@@ -30,6 +31,11 @@ import FoliageControls from './FoliageControls.jsx'
 import Editor from './Editor.jsx'
 import EditorPanel from './EditorPanel.jsx'
 import { EDIT, useLevelVersion, useEditing, setEditing } from '../level/levelEdits.js'
+
+// The rows mutate in place, so the level revision is the observable input that
+// tells React to take a fresh content snapshot. An unchanged table still
+// returns the same string and therefore keeps its mounted actors.
+const rowsKey = (rows, revision) => (void revision, JSON.stringify(rows))
 
 // One authoritative update order per frame: input -> movement/collision/surface
 // -> tricks/grinding -> animation channels -> audio. Views read P afterwards;
@@ -75,7 +81,7 @@ function GameLoop() {
       if (P.intro > 0) P.intro = Math.max(0, P.intro - dt / REVEAL)
       // The clock does not run during the reveal swoop — you can ride through
       // it, but you shouldn't be billed for the 1.5s the camera spends flying.
-      if (!g.runOver && P.intro === 0) {
+      if (!g.runOver && P.intro === 0 && !EDIT) {
         P.timeLeft = Math.max(0, P.timeLeft - dt)
         tickGoals(dt)
         // whole-second mirror: 1 HUD render per second, not one per frame
@@ -366,12 +372,16 @@ export default function Game() {
   // path, so restarting a run is a remount — one key on the group they share.
   const runId = useGame((s) => s.runId)
   const quality = useGame((s) => s.quality)
-  // A commit mutates levelData in place; Skatepark bakes its world matrices in
-  // a useLayoutEffect(..., []) and turns matrixWorldAutoUpdate off, so a moved
-  // row is invisible until that effect runs again. A remount IS the rebake —
-  // same trick runId plays for the collectibles.
+  // A commit mutates levelData in place, so Skatepark takes the version as a
+  // render signal. It content-keys each authored table independently; do not
+  // use the version as Skatepark's key, which would tear down static foliage
+  // and every GPU object for one edited row.
   const levelV = useLevelVersion()
   const editing = useEditing()
+  const [boneRowsKey, letterRowsKey, canRowsKey] = useMemo(
+    () => [rowsKey(BONE_ROWS, levelV), rowsKey(LETTER_ROWS, levelV), rowsKey(CAN_ROWS, levelV)],
+    [levelV],
+  )
   const warmedUp = useGame((s) => s.warmedUp)
   const { progress: loadProgress } = useProgress()
   const [editorLoaded, setEditorLoaded] = useState(() => !EDIT || useGame.getState().warmedUp)
@@ -496,18 +506,21 @@ export default function Game() {
       >
         <GameLoop />
         <Lighting />
-        <Skatepark key={levelV} />
+        <Skatepark version={levelV} />
+        {/* Kept outside Skatepark's versioned geometry updates: the six-face
+            reflection capture only needs
+            to run at initial warm-up and when entering play-test. */}
+        <BowlProbe editing={editing} />
         <Player />
-        {/* levelV joins runId here for the same reason Skatepark carries it:
-            these three read their tables at mount, so a bone added or moved in
-            the editor is invisible until the group remounts. */}
         {/* Play-test wreckage is transient. Switching modes remounts these
             actors from authored level data, so a smashed can never disappears
-            from the editor just because it was hit during the last run. */}
-        <group key={`${editing ? 'edit' : 'play'}:${runId}:${levelV}`}>
-          <Bones />
-          <Letters />
-          <Cans />
+            from the editor just because it was hit during the last run. Within
+            one mode, each table owns its key: placing a can must not also
+            rebuild every bone and asynchronous text glyph. */}
+        <group key={`${editing ? 'edit' : 'play'}:${runId}`}>
+          <Bones key={`bones:${boneRowsKey}`} />
+          <Letters key={`letters:${letterRowsKey}`} preview={editing} />
+          <Cans key={`cans:${canRowsKey}`} />
         </group>
         {!editing && <Intro />}
         {/* Editing needs geometry, light, and selection clarity—not gameplay
@@ -519,7 +532,7 @@ export default function Game() {
         <Warmup />
         {editing ? <Editor /> : <CameraController />}
       </Canvas>
-      {editing ? <EditorPanel onPlay={() => changeMode(false)} /> : <GameUI />}
+      {editing ? <EditorPanel onPlay={() => changeMode(false)} /> : <GameUI onExitTest={EDIT ? () => changeMode(true) : undefined} />}
       {editing && !editorLoaded && (
         <div className="hud ed-scene-loading">
           <LoadingScreen progress={loadProgress} editor />

@@ -1,13 +1,14 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { P, useGame, emit } from '../store.js'
+import { P, useGame, emit, activeGoalIds } from '../store.js'
 import { PHOTO } from '../photo.js'
 import { CANS } from '../level/levelData.js'
 import { groundHeightAt } from '../level/colliders.js'
 import { complete } from '../goals.js'
+import { characterSize } from './dogFit.js'
 
-// Five smashable trash cans — THPS's "smash 5 boxes".
+// Smashable trash cans — five in the shipped park, many in challenge levels.
 //
 // ponytail: a can is still NOT a collider, and the wreck is NOT physics. You
 // ride straight through; the body and lid then fly on a hand-integrated
@@ -116,6 +117,11 @@ export default function Cans() {
   const ys = useMemo(() => CANS.map((c) => groundHeightAt(c.x, c.z)), [])
   // a yaw per can so five identical drums don't line their facets up
   const spin = useMemo(() => CANS.map((_, i) => (i * 2.399) % Math.PI), [])
+  // Character sizing is authored per level and cannot change during a run.
+  // Let a giant dog behave like a giant wrecking ball too: Dog Bowling's
+  // tightly packed bundles should burst together, not require pixel-perfect
+  // passes through nine overlapping visual bodies.
+  const dogHitRadius = 0.85 * Math.max(0.5, characterSize().dog)
 
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.05)
@@ -134,7 +140,7 @@ export default function Cans() {
         if (dy > -0.4 && dy < H * size + 0.5) {
           const dx = P.pos.x - c.x
           const dz = P.pos.z - c.z
-          const hit2 = (RAD * size + 0.85) * (RAD * size + 0.85)
+          const hit2 = (RAD * size + dogHitRadius) * (RAD * size + dogHitRadius)
           if (dx * dx + dz * dz < hit2) {
             s.hit = true
             s.t = 0
@@ -149,6 +155,7 @@ export default function Cans() {
             s.sx = -P.vel.z / l // tumble axis: perpendicular to travel
             s.sz = P.vel.x / l
             n.current++
+            useGame.getState().smashCan()
             // particles go at the can's FOOT — g.position is the tumble pivot,
             // half a can up, and a burst there floats off the top of the drum
             _pos.set(c.x, ys[i], c.z)
@@ -156,8 +163,14 @@ export default function Cans() {
             emit('dust', { pos: _pos, amount: 5 })
             useGame.getState().addScore(150)
             // the goal pays its own points and popup — don't write over it
-            if (n.current === CANS.length) complete('cans')
-            else useGame.getState().showTrick(`Trash! ${n.current}/${CANS.length}`, 150)
+            if (n.current === CANS.length) {
+              complete('cans')
+              // A cans-only level has no reason to run down the remaining
+              // clock after its sole objective lands. Finish on the impact so
+              // the destruction burst cuts straight to the victory card.
+              const ids = activeGoalIds()
+              if (ids?.length === 1 && ids[0] === 'cans') useGame.getState().endRun()
+            } else useGame.getState().showTrick(`Trash! ${n.current}/${CANS.length}`, 150)
           }
         }
       } else if (s.t < BURST) {

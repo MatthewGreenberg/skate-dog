@@ -342,7 +342,6 @@ export function plazaRough() {
 // RAMP.wood instead of RAMP.plaza, dark gap, grain streaks along the plank.
 const PLAZA_PATTERNS = {
   tiles: { nx: 10, ny: 10, bond: 0, checker: 0, lo: 0.22, span: 0.72, gapDiv: 25 },
-  brick: { nx: 4, ny: 10, bond: 0.5, checker: 0, lo: 0.16, span: 0.78, gapDiv: 28 },
   checker: { nx: 8, ny: 8, bond: 0, checker: 1, gapDiv: 30 },
   concrete: { flat: true },
   // 2.67m x 0.31m boards, half-bond butt joints — a boardwalk, not parquet

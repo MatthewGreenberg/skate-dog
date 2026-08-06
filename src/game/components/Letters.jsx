@@ -17,7 +17,7 @@ import { complete } from '../goals.js'
 // URL is local.
 const FONT = '/fonts/LuckiestGuy-Regular.ttf'
 
-export default function Letters() {
+export default function Letters({ preview = false }) {
   const refs = useRef([])
   const st = useRef(LETTERS.map(() => ({ got: false, t: 0 })))
   const n = useRef(0)
@@ -32,13 +32,12 @@ export default function Letters() {
       const s = st.current[i]
       const b = LETTERS[i]
       if (!s.got) {
-        // Hidden until the run starts: the start frame is a composed shot (title
-        // centred, dog middle-left, briefing card top-right) and eight glyphs
-        // floating over the park is clutter in it. Toggled rather than
+        // Hidden until the run starts on the title screen, but always visible
+        // in the level editor: an authored collectible must remain visible
+        // after its placement ghost becomes a real row. Toggled rather than
         // unmounted — troika builds its SDF geometry asynchronously on mount,
-        // and deferring eight of those to the PLAY click buys a hitch on the
-        // first frame of the run for nothing.
-        g.visible = started
+        // and deferring that work to PLAY would hitch the first run frame.
+        g.visible = preview || started
         g.position.y = b.y + Math.sin(time * 1.5 + i * 2.3) * 0.13
         // Billboarded, not spun. A troika glyph is a flat single-sided quad, so
         // a bone's world-Y spin would show you the letter backwards half the

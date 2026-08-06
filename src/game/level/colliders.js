@@ -3,7 +3,7 @@
 // smooth ramps; the bowl uses its analytic height field. A uniform grid does
 // broad phase so we never test the whole park per frame.
 
-import { SOLIDS, WALLS, PLANTERS, PERIMETER, BENCHES, LAMPS, BOWL } from './levelData.js'
+import { SOLIDS, WALLS, PLANTERS, PERIMETER, BENCHES, LAMPS, BOWL, wallSegments } from './levelData.js'
 import { bowlHeight, bowlNormal, isInsideBowl } from './bowlGeometry.js'
 
 export const STEP_UP = 0.55 // how far the player can be pulled up onto a ledge
@@ -58,8 +58,11 @@ function addAll() {
     }
   }
 
+  // through wallSegments: a bent wall is one row that collides as a chain
   for (const w of WALLS) {
-    addRect({ ...w, id: 'wall', shape: 'flat', type: 'cap', top: (w.base || 0) + w.h })
+    for (const seg of wallSegments(w)) {
+      addRect({ ...seg, id: 'wall', shape: 'flat', type: 'cap', top: (seg.base || 0) + seg.h })
+    }
   }
   for (const p of PLANTERS) {
     addRect({ ...p, rot: p.rot || 0, id: 'planter', shape: 'flat', type: 'planter', top: (p.base || 0) + p.h })

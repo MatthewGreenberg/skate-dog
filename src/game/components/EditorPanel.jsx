@@ -1,12 +1,12 @@
 // Level editor DOM panel. Lives OUTSIDE the Canvas (Game.jsx mounts it under
 // ?edit); the 3D half — picking, placing and gizmos — is Editor.jsx.
 //
-// It is laid out as three questions in the order you actually ask them: WHAT
-// do I want (the tool palette), WHERE does it go (one hint line, then you click
-// the park), and IS IT RIGHT (a card of size / rotate / height steppers).
-// Everything that is a number rather than a decision — raw fields, the
-// outliner, JSON export — is folded into <details>, because a panel that opens
-// on 20 labelled inputs teaches you it is a spreadsheet with a park attached.
+// It is laid out like an editor workspace rather than one long settings panel:
+// BUILD lives on the left, the active INSPECTOR lives on the right, project
+// commands live in the top bar, and save/play live in a bottom command dock.
+// Everything that is a number rather than a decision — raw fields and the
+// outliner — stays folded into <details>, because a panel that opens on 20
+// labelled inputs teaches you it is a spreadsheet with a park attached.
 //
 // The steppers are the point: one click on Bigger is unambiguous, where
 // `w: 4.25` is two decisions (which field, what number) before you learn
@@ -21,13 +21,12 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   EDIT, keyOf, useLevelVersion, useEditor, TOOLS, TOOL, LOOKS, setBowl,
-  begin, commit, undo, redo, canUndo, canRedo,
-  editable, duplicateRow, deleteRow,
-  clearAll, resetLevel, hasSaved, toggleBowl, BOWL, SPAWN, setField,
-  railLength, extendRail, turnRail, liftRail,
+  begin, commit, undo,
+  editable, duplicateRow, deleteRow, deleteRows,
+  clearAll, hasSaved, deleteBowl, BOWL, SPAWN, setField, dimensionValue,
+  railLength, extendRail, turnRail, liftRail, bendRail,
   useSceneSettings, TIMES, GROUNDS, PATTERNS, setScene,
   setCharacterSize,
-  tableJSON, allJSON, copy,
   saveLevelAs, thumbCapture,
 } from '../level/levelEdits.js'
 import { useCharacterSize, CHARACTER_LIMITS } from './dogFit.js'
@@ -71,22 +70,6 @@ const STEP = {
 
 const NICE = { w: 'width', d: 'depth', h: 'height', rot: 'yaw', ch: 'letter', scale: 'size' }
 
-// Grid sizes, in metres. Objects also snap flush to each other's faces at any
-// of these — see Editor.jsx's snapAxis — so 'off' still snaps to geometry.
-const SNAPS = [['1m', 1], ['½m', 0.5], ['⅒', 0.1], ['off', 0]]
-
-const KEYS = [
-  ['1…9', 'pick a tool'],
-  ['click', 'place it'],
-  ['W / E', 'move / rotate'],
-  ['Q', 'world / local'],
-  ['F', 'frame selection'],
-  ['⌘Z / ⇧⌘Z', 'undo / redo'],
-  ['⌘D', 'duplicate'],
-  ['Del', 'delete'],
-  ['P', 'play'],
-]
-
 // The size steppers, per axis, in the order [label, candidate fields, step].
 // Per-AXIS and not one uniform Bigger/Smaller, because "make the ramp bigger"
 // is three different wishes — wider, longer, or steeper — and a uniform scale
@@ -117,7 +100,7 @@ const posOf = (r) => {
  *  type "-12.5" — and the intermediate "-" parses as NaN, which would land in
  *  the level. begin() fires on the first edit rather than on focus so that
  *  tabbing through fields doesn't fill the 50-deep undo stack with no-ops. */
-function Field({ table, row, name, value }) {
+function Field({ table, row, name, value, label, prominent = false }) {
   const [draft, setDraft] = useState(value ?? '')
   const dirty = useRef(false)
   const num = typeof value === 'number'
@@ -141,8 +124,8 @@ function Field({ table, row, name, value }) {
   }
 
   return (
-    <label className="ed-field">
-      <span title={name}>{NICE[name] ?? name}</span>
+    <label className={`ed-field${prominent ? ' ed-field-prominent' : ''}`}>
+      <span title={name}>{label ?? NICE[name] ?? name}</span>
       <input
         type={num ? 'number' : 'text'}
         step={num ? (STEP[name] ?? 0.1) : undefined}
@@ -183,45 +166,38 @@ export default function EditorPanel({ onPlay }) {
   const sceneTime = useSceneSettings((s) => s.time)
   const sceneGround = useSceneSettings((s) => s.ground)
   const scenePattern = useSceneSettings((s) => s.pattern)
-  const brickHue = useSceneSettings((s) => s.brickHue)
-  const { table, row, snap, add, addRot, bowlSel, specialSel, editing, select, clear, set, arm, hint: ghostHint, hintWarn } = useEditor()
-  const [copied, setCopied] = useState('')
+  const { table, row, selection, add, addRot, bowlSel, specialSel, editing, undoAvailable, select, picker, clear, set, arm, hint: ghostHint, hintWarn } = useEditor()
   const [saved, setSaved] = useState(false)
-  const flash = useRef(0)
+  const [settingsOpen, setSettingsOpen] = useState(true)
 
   const list = table ? editable(table) : []
   // Undo/redo REPLACE the row objects (restore() refills the arrays from a
   // snapshot), so the selected row goes stale and every inspector write would
   // land on an orphan that nothing renders. Re-resolve by the stable __k.
   const live = row && list.includes(row) ? row : row ? list.find((r) => r.__k === row.__k) : null
+  const selectedCount = selection.length
+  const pickerActive = !add && !live && !bowlSel && !specialSel
   useEffect(() => {
     if (row && !live) clear()
     else if (row && live !== row) select(table, live)
   }, [row, live, table, select, clear])
 
-  useEffect(() => () => clearTimeout(flash.current), [])
-
   // The panel must vanish while you are play-testing — it is fixed over the
   // viewport, and half of it is a hazard with the sim running.
   if (!EDIT || !editing) return null
-
-  const say = (what, text) => {
-    copy(text)
-    setCopied(what)
-    clearTimeout(flash.current)
-    flash.current = setTimeout(() => setCopied(''), 1200)
-  }
-
-  const shiftBrickHue = (by) => {
-    const next = ((brickHue + by + 180) % 360 + 360) % 360 - 180
-    setScene({ brickHue: next })
-  }
 
   // One control, not two: a palette entry arms placement AND scopes the
   // outliner. arm() is self-toggling and deliberately does NOT move `table`
   // (Editor.jsx's 1..9 shares it), so the scope is set here — clicking the
   // armed tool again disarms but leaves you browsing that table.
-  const pick = (tool) => { arm(tool.id); set({ table: tool.table }) }
+  const pick = (tool) => {
+    if (tool.special === 'pool' && BOWL.on) {
+      set({ table: null, row: null, selection: [], add: null, bowlSel: true, specialSel: null })
+      return
+    }
+    arm(tool.id)
+    set({ table: tool.table })
+  }
 
   // Every stepper is one undo step: begin, write, commit.
   const write = (changes) => {
@@ -238,20 +214,22 @@ export default function EditorPanel({ onPlay }) {
 
   const nudge = (name, by) => {
     const floor = name === 'y1' ? (live.y0 ?? 0) + 0.25 : 0.25
-    write({ [name]: Math.min(60, Math.max(floor, live[name] + by)) })
+    write({ [name]: Math.min(60, Math.max(floor, dimensionValue(table, live, name) + by)) })
   }
 
   const canTurn = live && typeof live.rot === 'number'
   const canLift = live && typeof live.y === 'number'
 
-  const fields = live ? Object.keys(live).filter((k) => !HIDDEN.has(k)) : []
+  // The character itself is the primary decision for a LETTER, so it lives on
+  // the open card instead of being hidden a second time in Fine tune.
+  const fields = live ? Object.keys(live).filter((k) => !HIDDEN.has(k) && !(table === 'LETTERS' && k === 'ch')) : []
   const used = new Set(GROUPS.flatMap(([, names]) => names))
   const groups = [
     ...GROUPS.map(([title, names]) => [title, names.filter((n) => fields.includes(n))]),
     ['Details', fields.filter((n) => !used.has(n))],
   ].filter(([, names]) => names.length)
 
-  const field = (name) =>
+  const field = (name, prominent = false) =>
     ENUMS[name]
       ? <EnumField key={`${keyOf(live)}:${name}:${version}`} table={table} row={live} name={name} value={live[name]} />
       // Remount on version so a gizmo drag (which writes x/z straight onto the
@@ -260,19 +238,23 @@ export default function EditorPanel({ onPlay }) {
       // reuses the same input instances and shows the previous row's drafts (a
       // LETTER rendered as `id: pad2, x: 2, z: 26` the first time this was
       // measured).
-      : <Field key={`${keyOf(live)}:${name}:${version}`} table={table} row={live} name={name} value={live[name]} />
+      : <Field key={`${keyOf(live)}:${name}:${version}`} table={table} row={live} name={name} value={dimensionValue(table, live, name)} label={live.grp && name === 'd' ? 'length' : undefined} prominent={prominent} />
 
   // ONE line, and it always says the next ACTION rather than the current state
   // — a static "Pick a tool" is a line you stop reading after a minute. While
   // armed, the ghost's live placementInfo feedback wins over the generic line.
   const hint = add
     ? (ghostHint ?? `Click the ground to place a ${TOOL[add].label.toLowerCase()}. R turns it, Esc stops.`)
+    : selectedCount > 1
+      ? `${selectedCount} objects selected. Shift-click to add or remove objects; Delete removes the selection.`
     : live
       ? 'Drag the gizmo, or use the steppers. Objects snap flush to each other.'
       : specialSel === 'spawn'
         ? 'Spawn point selected. Drag it to move the start, or rotate its arrow.'
-        : specialSel === 'character'
+      : specialSel === 'character'
           ? 'Dog and rider selected. Adjust their sizes below.'
+      : bowlSel
+        ? 'Pool selected. Drag it to move it, or use the size and depth controls.'
       : 'Pick a tool, then click the ground — or click something in the park.'
 
   // The selected row's tool is only knowable by table, and SOLIDS is four
@@ -288,15 +270,11 @@ export default function EditorPanel({ onPlay }) {
       <div className="ed-head">
         <div className="ed-head-copy">
           <h1>Level editor</h1>
-          <p>Build your skatepark</p>
+          <span className="ed-beta">BETA</span>
+          <span className={hasSaved() ? 'ed-dot on' : 'ed-dot'} title={hasSaved() ? 'Saved in this browser' : 'Nothing saved yet'}>
+            {hasSaved() ? 'saved' : 'new'}
+          </span>
         </div>
-        <span className={hasSaved() ? 'ed-dot on' : 'ed-dot'} title={hasSaved() ? 'Saved in this browser' : 'Nothing saved yet'}>
-          {hasSaved() ? 'saved' : 'new'}
-        </span>
-        {/* full navigation on purpose: leaving ?edit means a fresh module load */}
-        <button className="ed-home" title="Back to the home screen" onClick={() => { location.href = '/' }}>
-          Home
-        </button>
       </div>
 
       <div className="ed-scroll">
@@ -313,9 +291,9 @@ export default function EditorPanel({ onPlay }) {
             {TOOLS.map((t, i) => (
               <button
                 key={t.id}
-                className={`ed-toy${add === t.id ? ' on' : add ? '' : table === t.table ? ' scoped' : ''}`}
+                className={`ed-toy${add === t.id ? ' on' : add ? '' : t.special === 'pool' && BOWL.on ? ' scoped' : table === t.table && t.table ? ' scoped' : ''}`}
                 style={{ '--tint': t.tint }}
-                title={`${t.label} — click the ground to place${i < 9 ? ` (${i + 1})` : ''}`}
+                title={t.special === 'pool' && BOWL.on ? 'Select the pool' : `${t.label} — click the ground to place${i < 9 ? ` (${i + 1})` : ''}`}
                 aria-pressed={add === t.id}
                 onClick={() => pick(t)}
               >
@@ -325,18 +303,6 @@ export default function EditorPanel({ onPlay }) {
               </button>
             ))}
           </div>
-
-        {/* The pool is the one thing in the park you cannot place, only edit —
-            so it is not in the palette, and until this existed the only way to
-            reach it was to know its rim ring was clickable. */}
-        <button
-          className={`ed-pick${bowlSel ? ' on' : ''}`}
-          title="Select the pool — then drag its ring in the park, or use the card"
-          aria-pressed={bowlSel}
-          onClick={() => (bowlSel ? clear() : set({ row: null, add: null, bowlSel: true, specialSel: null }))}
-        >
-          <span>🏊 Pool</span><small>{BOWL.on ? 'Select & edit' : 'Removed'}</small>
-        </button>
 
           <div className={`ed-coach${add ? ' armed' : ''}${add && ghostHint && hintWarn ? ' warn' : ''}`}>
             <span>{hint}</span>
@@ -357,14 +323,23 @@ export default function EditorPanel({ onPlay }) {
             <span className="ed-step">2</span>
             <div>
               <h2>Edit a piece</h2>
-              <p>Select a park piece, the spawn marker, or the dog and rider.</p>
+              <p>Select a park piece, or Shift-click several for batch actions.</p>
             </div>
+            <button
+              className={`ed-picker${pickerActive ? ' on' : ''}`}
+              title="Clear selection and return to the regular picker (V)"
+              aria-label="Regular picker"
+              aria-pressed={pickerActive}
+              onClick={picker}
+            >
+              <span aria-hidden="true">↖</span> Picker <kbd>V</kbd>
+            </button>
           </div>
 
-        {!live && !bowlSel && !specialSel && (
+        {!selectedCount && !bowlSel && !specialSel && (
           <div className="ed-empty">
             <span>↖</span>
-            <p><b>Nothing selected</b>Click any park piece to move, resize, duplicate, or delete it.</p>
+            <p><b>Nothing selected</b>Click a park piece to edit it. Shift-click to select several.</p>
           </div>
         )}
 
@@ -416,14 +391,7 @@ export default function EditorPanel({ onPlay }) {
           </div>
         )}
 
-        {bowlSel && !BOWL.on && (
-          <div className="ed-card" style={{ '--tint': '#c8e6ff' }}>
-            <div className="ed-card-head"><i>🏊</i><b>Pool</b><em>removed</em></div>
-            <div className="ed-row ed-row-wide"><button onClick={toggleBowl}>Put the pool back</button></div>
-          </div>
-        )}
-
-        {bowlSel && BOWL.on && (
+        {bowlSel && (
           // The pool is not a row — it is an analytic field colliders,
           // parkGeometry and Skatepark each read — so it gets its own card.
           // Drag it in the park like anything else; these are the two numbers
@@ -446,14 +414,23 @@ export default function EditorPanel({ onPlay }) {
               <button title="Deeper" onClick={() => setBowl({ depthMid: Math.min(3.4, BOWL.depthMid + 0.15) })}>+</button>
             </div>
             <div className="ed-row ed-row-wide">
-              {/* Selection is KEPT: the card flips to "put it back", which is
-                  the only undo-free way to change your mind. */}
-              <button className="ed-bin" onClick={toggleBowl}>Remove pool</button>
+              <button className="ed-bin" title="Delete pool (Del)" onClick={() => { deleteBowl(); clear() }}>Delete</button>
             </div>
           </div>
         )}
 
-        {live && (
+        {selectedCount > 1 && (
+          <div className="ed-card ed-batch-card" style={{ '--tint': '#e8ddff' }}>
+            <div className="ed-card-head"><i>◆</i><b>{selectedCount} objects selected</b><em>batch</em></div>
+            <p className="ed-note">Shift-click another object to add it, or Shift-click a selected object to remove it.</p>
+            <div className="ed-row ed-row-wide">
+              <button onClick={clear}>Clear selection</button>
+              <button className="ed-bin" title="Delete selected (Del)" onClick={() => { deleteRows(selection); clear() }}>Delete selected</button>
+            </div>
+          </div>
+        )}
+
+        {live && selectedCount === 1 && (
           <div className="ed-card" style={{ '--tint': tool?.tint ?? '#eee' }}>
             <div className="ed-card-head">
               <i>{tool?.glyph}</i>
@@ -497,6 +474,8 @@ export default function EditorPanel({ onPlay }) {
               </div>
             )}
 
+            {table === 'LETTERS' && field('ch', true)}
+
             {table === 'RAILS' && (
               // A rail carries no w/h/rot/y, so DIMS and the rotate/lift rows
               // below all miss it — these mutate its `pts` instead. Same three
@@ -519,6 +498,12 @@ export default function EditorPanel({ onPlay }) {
                   <b>{live.pts[0][1].toFixed(2)}</b>
                   <button title="Raise" onClick={() => railWrite(liftRail, 0.1)}>▲</button>
                 </div>
+                <div className="ed-row">
+                  <span>Bend</span>
+                  <button title="Curve left" onClick={() => railWrite(bendRail, -Math.PI / 12)}>◜</button>
+                  <button title="Straighten" onClick={() => railWrite(bendRail, 0)}>│</button>
+                  <button title="Curve right" onClick={() => railWrite(bendRail, Math.PI / 12)}>◝</button>
+                </div>
               </>
             )}
 
@@ -528,17 +513,26 @@ export default function EditorPanel({ onPlay }) {
                 <div key={label} className="ed-row">
                   <span>{label}</span>
                   <button title={`${label} −${step}m`} onClick={() => nudge(name, -step)}>−</button>
-                  <b>{(name === 'y1' ? live.y1 - (live.y0 ?? 0) : live[name]).toFixed(2)}</b>
+                  <b>{(name === 'y1' ? live.y1 - (live.y0 ?? 0) : dimensionValue(table, live, name)).toFixed(2)}</b>
                   <button title={`${label} +${step}m`} onClick={() => nudge(name, step)}>+</button>
                 </div>
               )
             })}
+            {table === 'WALLS' && (
+              // One row, drawn and collided as a chain of chords — see
+              // levelData's wallSegments. 0 is a plain straight box.
+              <div className="ed-row">
+                <span>Bend</span>
+                <button title="Curve left" onClick={() => write({ bend: Math.max(-2.4, (live.bend || 0) - Math.PI / 12) })}>◜</button>
+                <b>{Math.round(((live.bend || 0) * 180) / Math.PI)}°</b>
+                <button title="Curve right" onClick={() => write({ bend: Math.min(2.4, (live.bend || 0) + Math.PI / 12) })}>◝</button>
+              </div>
+            )}
             {canTurn && (
               <div className="ed-row">
                 <span>Rotate</span>
                 <button title="15° left" onClick={() => write({ rot: live.rot - Math.PI / 12 })}>↺</button>
                 <button title="15° right" onClick={() => write({ rot: live.rot + Math.PI / 12 })}>↻</button>
-                <button title="Square to the grid" onClick={() => write({ rot: Math.round(live.rot / (Math.PI / 2)) * (Math.PI / 2) })}>⊹</button>
               </div>
             )}
             {canLift && (
@@ -559,7 +553,7 @@ export default function EditorPanel({ onPlay }) {
               {groups.map(([title, names]) => (
                 <div key={title} className="ed-group">
                   <h4>{title}</h4>
-                  {names.map(field)}
+                  {names.map((name) => field(name))}
                 </div>
               ))}
               {live.pts && <p className="ed-note">pts: {live.pts.length} points (drag in 3D)</p>}
@@ -573,8 +567,10 @@ export default function EditorPanel({ onPlay }) {
             {list.map((r, i) => (
               <button
                 key={keyOf(r)}
-                className={r === live ? 'on' : ''}
-                onClick={() => select(table, r)}
+                className={selection.some((item) => item.table === table && item.row === r) ? 'on' : ''}
+                aria-pressed={selection.some((item) => item.table === table && item.row === r)}
+                title="Shift-click to add or remove from the selection"
+                onClick={(e) => select(table, r, e.shiftKey)}
               >
                 <b>{r.id ?? `${table.toLowerCase()}[${i}]`}</b>
                 {hintOf(r) && <i>{hintOf(r)}</i>}
@@ -586,14 +582,21 @@ export default function EditorPanel({ onPlay }) {
         </details>
         </section>
 
-        {/* Level-wide controls are grouped after the core add/edit workflow so
-            they stay easy to find without competing with the current task. */}
-        <details className="ed-section ed-settings">
-          <summary>
+        {/* Level-wide appearance is a primary workspace above the inspector.
+            It starts open, but collapses when the user wants more canvas. */}
+        <section className="ed-section ed-settings">
+          <button
+            type="button"
+            className="ed-settings-heading"
+            aria-expanded={settingsOpen}
+            aria-controls="park-settings-controls"
+            onClick={() => setSettingsOpen((open) => !open)}
+          >
             <span className="ed-section-icon">✦</span>
-            <span><b>Park settings</b><small>Ground, colour, and time of day</small></span>
-          </summary>
-          <div className="ed-settings-body">
+            <span><b>Park settings</b><small>Shape the look of the whole park</small></span>
+            <span className="ed-settings-chevron" aria-hidden="true">⌄</span>
+          </button>
+          {settingsOpen && <div className="ed-settings-body" id="park-settings-controls">
             <div className="ed-card" style={{ '--tint': '#e8d9ff' }}>
               <div className="ed-card-head"><i>🎨</i><b>Scenery</b></div>
               <div className="ed-row ed-look ed-patterns">
@@ -638,70 +641,45 @@ export default function EditorPanel({ onPlay }) {
                   ))}
                 </div>
               </div>
-              <div className="ed-row">
-                <span>Bricks</span>
-                <button
-                  title="Rotate the brick hue 15° toward pink and warm tones"
-                  onClick={() => shiftBrickHue(-15)}
-                >←</button>
-                <b title="Brick hue shift; 0° is the original purple">{brickHue}°</b>
-                <button
-                  title="Rotate the brick hue 15° toward blue and cool tones"
-                  onClick={() => shiftBrickHue(15)}
-                >→</button>
-              </div>
             </div>
 
-          </div>
-        </details>
+          </div>}
+        </section>
 
-        <details className="ed-more ed-manage">
-          <summary>Manage level &amp; export</summary>
-          <div className="ed-bar">
-            <button title="Start from an empty park" onClick={() => { if (window.confirm('Clear the whole level? (⌘Z undoes it)')) clearAll() }}>Clear all</button>
-            <button title="Restore the shipped park" onClick={resetLevel}>Reset to shipped</button>
-            <button className={BOWL.on ? 'on' : ''} title={BOWL.on ? 'Fill the pool in' : 'Put the pool back'} onClick={toggleBowl}>Pool {BOWL.on ? 'on' : 'off'}</button>
-          </div>
-          <div className="ed-bar">
-            <button disabled={!table} onClick={() => say('table', tableJSON(table))}>Copy table</button>
-            <button onClick={() => say('all', allJSON())}>Copy all</button>
-            {copied && <span className="ed-note">Copied {copied}</span>}
-          </div>
-          <div className="ed-keys">
-            {KEYS.map(([k, what]) => <p key={k}><kbd>{k}</kbd>{what}</p>)}
-          </div>
-        </details>
       </div>
 
-      <div className="ed-foot">
-        <div className="ed-chips">
-          <button title="Undo (⌘Z)" disabled={!canUndo()} onClick={undo}>↶ Undo</button>
-          <button title="Redo (⇧⌘Z)" disabled={!canRedo()} onClick={redo}>↷</button>
-          <span className="ed-snaps" title="Grid snap, in metres — objects snap flush to each other regardless">
-            {SNAPS.map(([label, v]) => (
-              <button key={label} className={snap === v ? 'on' : ''} onClick={() => set({ snap: v })}>{label}</button>
-            ))}
-          </span>
+      <div className="ed-dock">
+        <div className="ed-foot">
+          <div className="ed-chips">
+            <button className={undoAvailable ? 'available' : ''} title="Undo (⌘Z)" disabled={!undoAvailable} onClick={undo}>↶ Undo</button>
+            <button className="ed-danger-action" title="Start from an empty park" onClick={() => { if (window.confirm('Clear the whole level? (⌘Z undoes it)')) clearAll() }}>Clear park</button>
+          </div>
+          <button
+            className="ed-save"
+            title="Save to My Levels — playable from the home screen"
+            onClick={() => {
+              // native prompt over a modal: one question, and the editor's
+              // keyboard handlers can't eat keystrokes while it's up
+              const name = window.prompt('Name this level:', 'My park')?.trim()
+              if (!name) return
+              if (saveLevelAs(name, thumbCapture.fn?.() ?? null)) {
+                setSaved(true)
+                setTimeout(() => setSaved(false), 1600)
+              }
+            }}
+          >
+            {saved ? '✓ Saved' : '💾 Save'}
+          </button>
+          <button className="ed-play" title="Play-test the level (Esc to return)" onClick={onPlay}>
+            ▶ Play <em>Esc to return</em>
+          </button>
         </div>
-        <button
-          className="ed-save"
-          title="Save to My Levels — playable from the home screen"
-          onClick={() => {
-            // native prompt over a modal: one question, and the editor's
-            // keyboard handlers can't eat keystrokes while it's up
-            const name = window.prompt('Name this level:', 'My park')?.trim()
-            if (!name) return
-            if (saveLevelAs(name, thumbCapture.fn?.() ?? null)) {
-              setSaved(true)
-              setTimeout(() => setSaved(false), 1600)
-            }
-          }}
-        >
-          {saved ? '✓ Saved' : '💾 Save'}
-        </button>
-        <button className="ed-play" title="Play-test the level (Esc to return)" onClick={onPlay}>
-          ▶ Play <em>Esc to return</em>
-        </button>
+        {/* full navigation on purpose: leaving ?edit means a fresh module load */}
+        <div className="ed-home-island">
+          <button className="ed-home" title="Back to the home screen" onClick={() => { location.href = '/' }}>
+            Home
+          </button>
+        </div>
       </div>
     </div>
   )

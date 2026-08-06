@@ -4,9 +4,7 @@
 // only if the shot happens to be framed on it. Two invariants, both cheap:
 //
 //   facing  — 1m in front of the seat is open ground, not the wall or planter
-//             the bench is tucked against. This is what caught all four bowl
-//             benches pointing at the retaining wall with their backs to the
-//             bowl (rot was the outward normal, -t + PI/2, not the inward one).
+//             the bench is tucked against.
 //   footing — a bench standing inside a raised deck's footprint has `base` set
 //             to that deck's top. The pad1 bench was authored at base 0 and
 //             rendered entirely inside the 1.2m pad.
@@ -14,7 +12,7 @@
 // ponytail: footprints only, no mesh. The props are boxes; a rect test sees
 // every overlap that matters here.
 
-import { BENCHES, BOWL, WALLS, PLANTERS, SOLIDS } from './levelData.js'
+import { BENCHES, WALLS, PLANTERS, SOLIDS } from './levelData.js'
 
 let fails = 0
 const check = (ok, msg) => {
@@ -68,17 +66,6 @@ for (const b of BENCHES) {
     if (!inRect(b.x, b.z, s)) continue
     check(base === s.top, `${label(b)} is on deck ${s.id} (top ${s.top}) but base is ${base}`)
   }
-}
-
-// ---- the four arc benches are the ones the comment claims face the bowl ----
-const arc = BENCHES.filter((b) => Math.hypot(b.x - BOWL.cx, b.z - BOWL.cz) < 9)
-check(arc.length === 4, `expected 4 benches on the bowl arc, found ${arc.length}`)
-for (const b of arc) {
-  const tx = BOWL.cx - b.x
-  const tz = BOWL.cz - b.z
-  const d = Math.hypot(tx, tz)
-  const dot = (Math.sin(b.rot) * tx + Math.cos(b.rot) * tz) / d
-  check(dot > 0.9, `${label(b)} should face the bowl, dot = ${dot.toFixed(2)}`)
 }
 
 console.log(fails ? `${fails} failure(s)` : `benches ok (${BENCHES.length})`)

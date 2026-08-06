@@ -108,16 +108,16 @@ export const SOLIDS = [
   // the whole structure read as a walled courtyard, not one U-shaped ramp.
   // z geometry hangs off the centre (24.5): half-flat 1.6, then a 2.4 run, then
   // a 1.4 deck — the platform spans the lot.
-  box({ id: 'hpDeck', x: -26, z: 24.5, w: 12, d: HP_FLAT + 2 * (2.4 + 1.4), top: HP_BASE, style: 'solid' }),
-  ramp({ id: 'hpN', x: -26, z: 24.5 - HP_FLAT / 2 - 1.2, w: 12, d: 2.4, rot: Math.PI, y0: HP_BASE, y1: HP_BASE + HP_H, curve: 'quarter', style: 'solid' }),
-  ramp({ id: 'hpS', x: -26, z: 24.5 + HP_FLAT / 2 + 1.2, w: 12, d: 2.4, rot: 0, y0: HP_BASE, y1: HP_BASE + HP_H, curve: 'quarter', style: 'solid' }),
+  box({ id: 'hpDeck', grp: 'halfpipe', x: -26, z: 24.5, w: 12, d: HP_FLAT + 2 * (2.4 + 1.4), top: HP_BASE, style: 'solid' }),
+  ramp({ id: 'hpN', grp: 'halfpipe', x: -26, z: 24.5 - HP_FLAT / 2 - 1.2, w: 12, d: 2.4, rot: Math.PI, y0: HP_BASE, y1: HP_BASE + HP_H, curve: 'quarter', style: 'solid' }),
+  ramp({ id: 'hpS', grp: 'halfpipe', x: -26, z: 24.5 + HP_FLAT / 2 + 1.2, w: 12, d: 2.4, rot: 0, y0: HP_BASE, y1: HP_BASE + HP_H, curve: 'quarter', style: 'solid' }),
   // Top decks behind the coping, like a real vert ramp. Without them the
   // quarter is zero-thickness at its lip, and a dog CRESTING slowly straddles
   // the top with half its body printed out the back face — a lift can't fix
   // "the surface ends here". The ramp collider's 1m top overhang hands off to
   // these seamlessly; qp1 never had the problem because deckA is its deck.
-  box({ id: 'hpDeckN', x: -26, z: 24.5 - HP_FLAT / 2 - 2.4 - 0.7, w: 12, d: 1.4, top: HP_BASE + HP_H, style: 'solid' }),
-  box({ id: 'hpDeckS', x: -26, z: 24.5 + HP_FLAT / 2 + 2.4 + 0.7, w: 12, d: 1.4, top: HP_BASE + HP_H, style: 'solid' }),
+  box({ id: 'hpDeckN', grp: 'halfpipe', x: -26, z: 24.5 - HP_FLAT / 2 - 2.4 - 0.7, w: 12, d: 1.4, top: HP_BASE + HP_H, style: 'solid' }),
+  box({ id: 'hpDeckS', grp: 'halfpipe', x: -26, z: 24.5 + HP_FLAT / 2 + 2.4 + 0.7, w: 12, d: 1.4, top: HP_BASE + HP_H, style: 'solid' }),
 
   // ---- stairs -----------------------------------------------------------
   stair({ id: 'stairA', x: 0.5, z: 13, w: 5.4, d: 5, rot: -Math.PI / 2, y0: 0, y1: PAD1, steps: 6 }),
@@ -130,21 +130,45 @@ export const SOLIDS = [
 // `h` the height above that. Solid; the cap is landable.
 const wall = (o) => ({ base: 0, rot: 0, h: 1.15, mural: null, ...o })
 
-function arcWall(cx, cz, r, a0, a1, n, h, muralAt) {
+// A wall may be BENT. `bend` is the total arc it sweeps, in radians, about its
+// own centre — 0 is a plain box and the row is returned untouched, so nothing
+// in the shipped park changes. Everything downstream (Skatepark's <Wall>,
+// colliders, rails' lip edges) reads walls THROUGH this, so a bent wall is
+// still ONE editable row with one gizmo and one undo, not a group.
+//
+// ponytail: chord segments, not a curved collider — the sim only understands
+// boxes, and arcWall above already ships the park's one curved wall this way.
+// Raise SEG_ARC if the facets read at play distance.
+const SEG_ARC = 0.22 // radians of arc per segment
+export function wallSegments(w) {
+  const bend = w.bend || 0
+  if (!bend) return [w]
+  const alongZ = w.d >= w.w
+  const len = alongZ ? w.d : w.w
+  const n = Math.min(16, Math.max(3, Math.round(Math.abs(bend) / SEG_ARC)))
+  const R = len / bend
+  // Local frame: u runs along the wall, v is across it. `rot` yaws local +Z to
+  // (sin, cos), so local +X is (cos, -sin).
+  const c = Math.cos(w.rot), s = Math.sin(w.rot)
+  const [ux, uz, vx, vz] = alongZ ? [s, c, c, -s] : [c, -s, s, c]
   const out = []
   for (let i = 0; i < n; i++) {
-    const t = a0 + ((a1 - a0) * (i + 0.5)) / n
-    out.push(
-      wall({
-        x: cx + Math.cos(t) * r,
-        z: cz + Math.sin(t) * r,
-        w: 1.1,
-        d: ((a1 - a0) * r) / n + 0.3,
-        rot: -t,
-        h,
-        mural: muralAt.includes(i) ? 'flower' : null,
-      }),
-    )
+    const phi = bend * ((i + 0.5) / n - 0.5)
+    // arc point at phi, measured from the midpoint (phi = 0 -> the row's x/z)
+    const a = R * Math.sin(phi)
+    const b = R * (1 - Math.cos(phi))
+    // overlap the chords so the joints don't open at the outside face
+    const seg = len / n + 0.25
+    out.push({
+      ...w,
+      bend: 0,
+      seg: true,
+      x: w.x + ux * a + vx * b,
+      z: w.z + uz * a + vz * b,
+      rot: alongZ ? w.rot + phi : w.rot - phi,
+      w: alongZ ? w.w : seg,
+      d: alongZ ? seg : w.d,
+    })
   }
   return out
 }
@@ -177,10 +201,6 @@ export const WALLS = [
   // south low deck skirt, split by the two banks
   wall({ x: 2.5, z: 21.6, w: 3, d: 1.2, h: PAD2 + 0.5 }),
   wall({ x: 2, z: 30.6, w: 20, d: 1.2, h: PAD2 + 0.6, mural: 'rainbow' }),
-
-  // curved retaining wall hugging the bowl on the west — ref image 1.
-  // Pushed out by bowlWall() below, which is also what re-runs it when the
-  // editor moves or grows the bowl.
 
   // north plaza divider with a rainbow mural
   wall({ x: -4, z: -20.6, w: 12, d: 1.2, h: 1.15, mural: 'rainbow' }),
@@ -274,7 +294,7 @@ for (const [id, side, color, off] of [
 ]) {
   // `derived` marks a row the level editor must not offer for editing: it is
   // recomputed from another row (here, the stair) and an edit would be silently
-  // thrown away on the next reload. Same flag on the arc wall and bowl benches.
+  // thrown away on the next reload.
   RAILS.push({ ...handrail(SOLIDS.find((s) => s.id === id), side, color, off), derived: true })
 }
 
@@ -291,8 +311,8 @@ export const LAMPS = [
   { x: 0, z: 32, banner: 'flower' },
 ]
 
-// benches tucked against the curved wall, facing the bowl — ref image 1.
-// The four bowl-side ones are appended by rebuildBowlDerived() below.
+// Standalone benches. The pool deliberately brings no furniture with it — a
+// user enabling one feature should not silently place several other objects.
 export const BENCHES = [
   { x: -4, z: -19.3, rot: 0 },
   { x: 2, z: -19.3, rot: 0 },
@@ -304,47 +324,13 @@ export const BENCHES = [
   { x: 30.5, z: -14.6, base: DECK, rot: 0 },
 ]
 
-// ------------------------------------------------------------ bowl furniture
-// The retaining wall and the four bowl benches are POSITIONED BY the bowl, so
-// the editor moving or growing it has to regenerate them — otherwise you drag
-// the pool across the plaza and its wall stays behind, hugging a hole that
-// isn't there. Both radii are ratios of BOWL.r0 (measured off the shipped
-// 5.85: wall 9.4, benches 8.2) rather than the constants they used to be, so
-// "bigger pool" pushes its furniture out with it.
-//
-// `bowl: true` is the marker rebuildBowlDerived() splices on; `derived: true`
-// is what keeps them out of the editor's own lists (an edit to one vanishes on
-// the next reload — or, here, on the next bowl nudge).
-const WALL_R = 9.4 / 5.85
-const BENCH_R = 8.2 / 5.85
-
-const bowlWall = () =>
-  arcWall(BOWL.cx, BOWL.cz, BOWL.r0 * WALL_R, 2.45, 4.55, 9, 1.15, [2, 6])
-    .map((w) => ({ ...w, derived: true, bowl: true }))
-
-// A bench's local +Z is the seat front (back slats sit at local -0.3), so the
-// rot that looks INWARD from a point at bearing t is -t - PI/2. The +PI/2 form
-// is the outward normal and put all four backs to the bowl, facing the wall
-// 1.2m behind them.
-const bowlBenches = () =>
-  [2.7, 3.35, 4.0, 4.4].map((t) => ({
-    x: BOWL.cx + Math.cos(t) * BOWL.r0 * BENCH_R,
-    z: BOWL.cz + Math.sin(t) * BOWL.r0 * BENCH_R,
-    rot: -t - Math.PI / 2,
-    derived: true,
-    bowl: true,
-  }))
-
-/** Re-derive everything the bowl positions. Emits nothing while BOWL.on is
- *  false: a retaining wall curved around a filled-in plaza is set dressing for
- *  a feature that no longer exists. */
+// Compatibility cleanup for levels saved before the pool became independent.
+// Old blobs can contain auto-generated rows marked `bowl`; strip them on load
+// or the removed wall and benches would survive the UI change forever.
 export function rebuildBowlDerived() {
   for (const arr of [WALLS, BENCHES]) {
     for (let i = arr.length - 1; i >= 0; i--) if (arr[i].bowl) arr.splice(i, 1)
   }
-  if (!BOWL.on) return
-  WALLS.push(...bowlWall())
-  BENCHES.push(...bowlBenches())
 }
 rebuildBowlDerived()
 

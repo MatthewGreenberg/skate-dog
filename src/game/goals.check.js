@@ -3,8 +3,8 @@
 // for the same reason: the handlers are subscribed to events that legitimately
 // repeat (a second Pool Gap is still a Pool Gap), so the idempotence guard is
 // the only thing between one challenge and an infinite time machine.
-import { useGame, emit, P, TIME_BONUS, RUN_TIME } from './store.js'
-import { GOALS, initGoals, tickGoals, resetGoals, complete, goalDone } from './goals.js'
+import { useGame, emit, P, TIME_BONUS, RUN_TIME, setRunRules, runRules } from './store.js'
+import { GOALS, activeGoals, initGoals, tickGoals, resetGoals, complete, goalDone } from './goals.js'
 
 function assert(ok, msg) {
   if (!ok) throw new Error(msg)
@@ -77,5 +77,22 @@ useGame.setState({ score: 40000 })
 tickGoals(0.3)
 assert(goalDone('good') && goalDone('best'), 'a 40,000 jump skipped a tier')
 assert(state().score === 40000 + 500 + 1000, `both tiers paid ${state().score - 40000}, want 1500`)
+
+// ---------------------------------------------------- 5. a challenge narrows the run
+setRunRules({ time: 30, goalIds: ['cans'], timeBonus: 0, subtitle: 'Smash them' })
+resetGoals()
+initGoals()
+useGame.setState({ score: 0, goalsDone: [] })
+assert(activeGoals().length === 1 && activeGoals()[0].id === 'cans', 'challenge did not narrow the card to cans')
+assert(!complete('fetch'), 'an inactive goal still completed')
+const challengeTime = P.timeLeft
+assert(complete('cans'), 'the active can goal refused completion')
+assert(P.timeLeft === challengeTime, 'zero-bonus challenge changed its 30-second clock')
+useGame.getState().restart()
+assert(P.timeLeft === 30 && state().timeLeft === 30, 'restart did not restore the challenge clock')
+setRunRules()
+resetGoals()
+initGoals()
+assert(runRules().time === RUN_TIME && activeGoals().length === GOALS.length, 'default run rules did not restore')
 
 console.log(`goals ok — ${GOALS.length} challenges, each pays once for +${TIME_BONUS}s, predicates discriminate`)

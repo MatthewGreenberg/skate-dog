@@ -5,15 +5,32 @@
 // is merged so nothing in the renderer will complain. Everything else about a
 // decal (which cell, what tint) is cosmetic and does not need a test.
 import assert from 'node:assert'
-import { buildDecalGeometry, CLUSTERS } from './decals.js'
+import { buildDecalGeometry, fixedDecalGeometry, poolSafeDecalGeometry, CLUSTERS } from './decals.js'
 import { groundHeightAt } from './colliders.js'
-import { PERIMETER } from './levelData.js'
+import { BOWL, PERIMETER } from './levelData.js'
 
 const g = buildDecalGeometry()
 const pos = g.getAttribute('position').array
 const uv = g.getAttribute('uv').array
 const col = g.getAttribute('color')
 const n = pos.length / 3
+
+// Editor remounts must reuse one scatter. A fresh collision-aware build can
+// legitimately differ after a level edit; the rendered geometry cannot.
+assert.strictEqual(fixedDecalGeometry(), fixedDecalGeometry(), 'rendered decal geometry must be session-stable')
+
+// Put the pool over the first fixed doodle. Pool safety removes that whole
+// quad; it never relocates the source scatter to compensate.
+const fixed = fixedDecalGeometry()
+const fixedPos = fixed.getAttribute('position')
+const oldBowl = { on: BOWL.on, cx: BOWL.cx, cz: BOWL.cz, r0: BOWL.r0 }
+BOWL.on = true
+BOWL.cx = (fixedPos.getX(0) + fixedPos.getX(1) + fixedPos.getX(2) + fixedPos.getX(3)) / 4
+BOWL.cz = (fixedPos.getZ(0) + fixedPos.getZ(1) + fixedPos.getZ(2) + fixedPos.getZ(3)) / 4
+BOWL.r0 = 0.01
+const safe = poolSafeDecalGeometry()
+assert(safe.getIndex().count <= fixed.getIndex().count - 6, 'pool overlap must hide the whole doodle')
+Object.assign(BOWL, oldBowl)
 
 // The scatter rejects candidates that don't fit, so a bad `fits` shows up as a
 // near-empty park rather than as an error. Floor: enough to break up the plaza.

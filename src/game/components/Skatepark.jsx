@@ -4,11 +4,22 @@ import { useThree } from '@react-three/fiber'
 import { RoundedBox } from '@react-three/drei'
 import { C, M } from '../palette.js'
 import { useGame } from '../store.js'
-import { SOLIDS, WALLS, RAILS, PERIMETER, GRASS_Y, BOWL } from '../level/levelData.js'
+import {
+  SOLIDS,
+  WALLS,
+  RAILS,
+  PLANTERS,
+  BENCHES,
+  LAMPS,
+  PERIMETER,
+  GRASS_Y,
+  BOWL,
+  wallSegments,
+} from '../level/levelData.js'
 import { groundHeightAt, AO_FOOTPRINTS } from '../level/colliders.js'
 import { buildBowlGeometry, buildCopingGeometry } from '../level/bowlGeometry.js'
 import { buildPlazaGeometry, buildGrassGeometry, buildRampGeometry } from '../level/parkGeometry.js'
-import { buildDecalGeometry } from '../level/decals.js'
+import { poolSafeDecalGeometry } from '../level/decals.js'
 import {
   plazaMap,
   plazaMapFor,
@@ -36,31 +47,6 @@ import {
 } from '../level/textures.js'
 import { Trees, Shrubs, Planters, Benches, LampPosts, Wind, getMuralTexture } from './Props.jsx'
 import { useSceneSettings, groundOf, patternOf } from '../level/levelEdits.js'
-
-// Live hue rotation for the masonry map. A material colour multiply cannot
-// turn purple brick into teal or gold—it can only remove channels—so the hue
-// control belongs after map sampling in the shader. The uniform object is
-// stable: changing it updates every masonry mesh without recompiling.
-const BRICK_HUE = { value: 0 }
-const brickHueShader = (shader) => {
-  shader.uniforms.brickHue = BRICK_HUE
-  shader.fragmentShader = shader.fragmentShader
-    .replace(
-      'void main() {',
-      `uniform float brickHue;
-      vec3 rotateBrickHue(vec3 c, float a) {
-        const vec3 axis = vec3(0.57735);
-        float cs = cos(a);
-        return c * cs + cross(axis, c) * sin(a) + axis * dot(axis, c) * (1.0 - cs);
-      }
-      void main() {`,
-    )
-    .replace(
-      '#include <map_fragment>',
-      `#include <map_fragment>
-      diffuseColor.rgb = max(vec3(0.0), rotateBrickHue(diffuseColor.rgb, brickHue));`,
-    )
-}
 
 // ---------------------------------------------------------------- materials
 // Every surface now carries a normal map AND a roughness map. That pairing is
@@ -177,8 +163,6 @@ function mats() {
     // editor-pickable fourth enamel; the benches already wear C.railMint
     railMint: std({ color: C.railMint, ...M.rail, envMapIntensity: 1.5 }),
   }
-  _mats.masonry.onBeforeCompile = brickHueShader
-  _mats.masonry.customProgramCacheKey = () => 'masonry-brick-hue-v1'
   return _mats
 }
 
@@ -197,45 +181,68 @@ function mats() {
  * the flat sees mostly its own walls and returns a muddy violet, while one at
  * the lip keeps the sky in the upper hemisphere where the transition needs it.
  */
-function BowlProbe() {
+export function BowlProbe({ editing }) {
   const { gl, scene } = useThree()
+  const targetRef = useRef(null)
+  const captureRef = useRef(null)
+  const wasEditing = useRef(editing)
+
+  // The probe deliberately lives OUTSIDE Skatepark's versioned geometry. A
+  // level commit must not turn one editor click into six synchronous renders
+  // of the entire scene.
   useEffect(() => {
-    useGame.getState().setWarmupReflectionReady(false)
-    const target = new THREE.WebGLCubeRenderTarget(256, {
-      type: THREE.HalfFloatType,
-      generateMipmaps: true,
-      minFilter: THREE.LinearMipmapLinearFilter,
-    })
-    const cam = new THREE.CubeCamera(0.4, 120, target)
-    cam.position.set(BOWL.cx, 0.6, BOWL.cz)
-    scene.add(cam)
+    const capture = () => {
+      useGame.getState().setWarmupReflectionReady(false)
+      const target = new THREE.WebGLCubeRenderTarget(256, {
+        type: THREE.HalfFloatType,
+        generateMipmaps: true,
+        minFilter: THREE.LinearMipmapLinearFilter,
+      })
+      const cam = new THREE.CubeCamera(0.4, 120, target)
+      cam.position.set(BOWL.cx, 0.6, BOWL.cz)
+      scene.add(cam)
 
-    const m = mats()
-    const users = [m.bowl, m.coping, m.railTeal, m.railPink, m.railYellow]
-    // Render with the probe's consumers hidden: a surface must not reflect
-    // itself, and the bowl is a closed dish, so leaving it in bakes a purple
-    // fog into its own reflection.
-    const prev = users.map((mat) => mat.envMap)
-    for (const mat of users) mat.envMap = null
+      const m = mats()
+      const users = [m.bowl, m.coping, m.railTeal, m.railPink, m.railYellow]
+      // Render with the probe's consumers hidden: a surface must not reflect
+      // itself, and the bowl is a closed dish, so leaving it in bakes a purple
+      // fog into its own reflection.
+      for (const mat of users) mat.envMap = null
 
-    cam.update(gl, scene)
+      cam.update(gl, scene)
 
-    for (let i = 0; i < users.length; i++) {
-      users[i].envMap = target.texture
-      users[i].needsUpdate = true
-      void prev[i]
+      for (const mat of users) {
+        mat.envMap = target.texture
+        mat.needsUpdate = true
+      }
+      scene.remove(cam)
+      targetRef.current?.dispose()
+      targetRef.current = target
+      useGame.getState().setWarmupReflectionReady(true)
     }
-    scene.remove(cam)
+
+    captureRef.current = capture
+    capture()
     // Warmup waits for this exact signal before raising the render tier. The
     // expensive six-face capture therefore happens at low DPR/AO/shadow cost
     // and remains hidden behind the loading screen.
-    useGame.getState().setWarmupReflectionReady(true)
     return () => {
+      captureRef.current = null
       useGame.getState().setWarmupReflectionReady(false)
-      target.dispose()
+      targetRef.current?.dispose()
+      targetRef.current = null
     }
-    // once, after the park has mounted — deps intentionally empty
   }, [gl, scene])
+
+  // Editor commits leave the existing reflection alone. Entering play-test is
+  // the one point where the final authored park needs a fresh capture; the mode
+  // cover hides that deliberate one-time cost.
+  useEffect(() => {
+    const previous = wasEditing.current
+    wasEditing.current = editing
+    if (previous && !editing) captureRef.current?.()
+  }, [editing])
+
   return null
 }
 
@@ -271,7 +278,6 @@ function Plaza() {
   const m = mats()
   const ground = useSceneSettings((s) => s.ground)
   const pattern = useSceneSettings((s) => s.pattern)
-  const brickHue = useSceneSettings((s) => s.brickHue)
   // The editor's ground look: tint multiplies the plaza albedo, and the
   // PATTERN swaps the albedo/normal pair wholesale (plazaMapFor returns the
   // shipped cached maps for 'slabs', so a plain visit mounts the exact same
@@ -302,8 +308,7 @@ function Plaza() {
     m.hpSurf.color.set(surface.hpSurf ?? '#ffffff')
     m.wood.color.set(surface.wood ?? '#ffffff')
     m.grass.color.set(surface.grass ?? '#ffffff')
-    BRICK_HUE.value = brickHue * THREE.MathUtils.DEG2RAD
-  }, [ground, pattern, brickHue, m])
+  }, [ground, pattern, m])
   return (
     <>
       <mesh geometry={geo} receiveShadow material={m.plazaGround} />
@@ -319,7 +324,10 @@ function Plaza() {
 // 6mm up rather than coplanar: polygonOffset alone still z-fights at a grazing
 // angle across 70m of floor, which is exactly the angle this floor is seen at.
 function Decals() {
-  const geo = useMemo(() => buildDecalGeometry(), [])
+  // Plaza is keyed only by the pool settings. Ordinary editor placements keep
+  // this memo alive; moving/resizing the pool remounts it and filters the fixed
+  // scatter without relocating any surviving doodle.
+  const geo = useMemo(() => poolSafeDecalGeometry(), [])
   const m = mats()
   // no castShadow — a flat quad on the ground casts an acne stripe, not a shadow
   return <mesh geometry={geo} position-y={0.006} receiveShadow material={m.decal} />
@@ -583,39 +591,17 @@ function Rail({ r }) {
 }
 
 // ---------------------------------------------------------------- park
-export default function Skatepark() {
-  const root = useRef()
-
-  // mats() is module-cached, so the plaza material outlives this remount and
-  // would keep the AO baked from whatever the level looked like at first mount
-  // — contact shadows under props you have since moved or deleted. bumpLevel()
-  // drops the texture and the footprints; this re-bakes on the remount that
-  // same bump triggers. needsUpdate because aoMap presence is a shader define.
-  useLayoutEffect(() => {
-    const m = mats().plazaGround
-    m.aoMap = parkAOMap(AO_FOOTPRINTS)
-    m.needsUpdate = true
-  })
+// The level tables are mutable module arrays. React Compiler cannot see an
+// in-place push as a dependency, so each table gets a primitive content key.
+// Mounting these small readers behind their own keys makes a wall commit rebuild
+// only walls, a ramp commit rebuild only solids, and so on.
+function SolidPieces() {
   const boxes = SOLIDS.filter((s) => s.kind === 'box')
   const ramps = SOLIDS.filter((s) => s.kind === 'ramp')
   const stairs = SOLIDS.filter((s) => s.kind === 'stairs')
 
-  // Nothing in here ever moves. Bake the world matrices once and opt the whole
-  // subtree out of the per-frame matrix walk — that is a few hundred objects.
-  useLayoutEffect(() => {
-    root.current.updateMatrixWorld(true)
-    root.current.matrixWorldAutoUpdate = false
-  }, [])
-
   return (
-    <group ref={root}>
-      <Plaza />
-      {/* BOWL.on is the editor's "delete the bowl" flag — Plaza drops its
-          cutout and sampleSurface stops reporting the dish. BowlProbe stays
-          mounted either way: it bakes the reflection the coping AND the three
-          rail materials read, and Warmup blocks on the ready signal it sets,
-          so skipping it would strand the loading screen. */}
-      {BOWL.on && <Bowl />}
+    <>
       {boxes.map((s) =>
         s.style === 'solid' ? <SolidSlab key={s.id} s={s} /> : <Slab key={s.id} s={s} />,
       )}
@@ -625,20 +611,84 @@ export default function Skatepark() {
       {stairs.map((s) => (
         <Stairs key={s.id} s={s} />
       ))}
-      {WALLS.map((w, i) => (
+    </>
+  )
+}
+
+function WallPieces() {
+  return (
+    <>
+      {WALLS.flatMap(wallSegments).map((w, i) => (
         <Wall key={i} w={w} />
       ))}
+    </>
+  )
+}
+
+function RailPieces() {
+  return (
+    <>
       {RAILS.map((r) => (
         <Rail key={r.id} r={r} />
       ))}
-      <Planters />
-      <Benches />
-      <LampPosts />
+    </>
+  )
+}
+
+function authoredKeys(version) {
+  // `version` makes this call observably change to React Compiler even when
+  // the only underlying change was an in-place array mutation. Unchanged table
+  // strings deliberately remain stable, preserving those mounted resources.
+  void version
+  return {
+    bowl: JSON.stringify(BOWL),
+    solids: JSON.stringify(SOLIDS),
+    walls: JSON.stringify(WALLS),
+    rails: JSON.stringify(RAILS),
+    planters: JSON.stringify(PLANTERS),
+    benches: JSON.stringify(BENCHES),
+    lamps: JSON.stringify(LAMPS),
+  }
+}
+
+export default function Skatepark({ version }) {
+  const root = useRef()
+  const keys = authoredKeys(version)
+
+  // mats() is module-cached, so refresh its AO texture on a level version. The
+  // editor defers invalidation until play-test; ordinary placements therefore
+  // keep the current texture. Replacing one populated texture with another does
+  // not change shader defines and must not force a material recompile.
+  useLayoutEffect(() => {
+    const m = mats().plazaGround
+    const ao = parkAOMap(AO_FOOTPRINTS)
+    if (m.aoMap !== ao) m.aoMap = ao
+  }, [version])
+
+  // Bake the stable parent once. Keyed table readers mount ordinary Three
+  // children beneath this identity group; their own matrices update normally,
+  // so forcing a recursive park-wide rebake after every placement only turns a
+  // tiny table replacement into a frame hitch.
+  useLayoutEffect(() => {
+    root.current.updateMatrixWorld(true)
+    root.current.matrixWorldAutoUpdate = false
+  }, [])
+
+  return (
+    <group ref={root}>
+      {/* BOWL.on is the editor's "delete the bowl" flag — Plaza drops its
+          cutout and sampleSurface stops reporting the dish. */}
+      <Plaza key={`plaza:${keys.bowl}`} />
+      {BOWL.on && <Bowl key={`bowl:${keys.bowl}`} />}
+      <SolidPieces key={`solids:${keys.solids}`} />
+      <WallPieces key={`walls:${keys.walls}`} />
+      <RailPieces key={`rails:${keys.rails}`} />
+      <Planters key={`planters:${keys.planters}`} />
+      <Benches key={`benches:${keys.benches}`} />
+      <LampPosts key={`lamps:${keys.lamps}`} />
       <Trees />
       <Shrubs />
       <Wind />
-      {/* last: the probe bakes what everything above it put in the scene */}
-      <BowlProbe />
     </group>
   )
 }

@@ -75,6 +75,32 @@ for (const s of RAMPS) {
   assert(peak > s.y1 - 0.05, `${s.id}: rode in at ${ENTRY}m/s and only reached ${peak.toFixed(2)} of ${s.y1}`)
 }
 
+// A descent is not just geometry-following: with no throttle, gravity must
+// leave the rider faster at the low edge. Use a quick entry speed so this also
+// catches flat-strength rolling drag masking the gain on a steep transition.
+{
+  const s = SOLIDS.find((r) => r.id === 'hpN')
+  const ux = Math.sin(s.rot), uz = Math.cos(s.rot)
+  const entry = 10
+  resetPlayer()
+  input.steer = 0
+  input.throttle = 0
+  input.brake = false
+  input.reverse = false
+  P.pos.set(s.x + ux * (s.d / 2 - 0.08), 0, s.z + uz * (s.d / 2 - 0.08))
+  P.pos.y = groundHeightAt(P.pos.x, P.pos.z)
+  P.heading = s.rot + Math.PI
+  P.vel.set(-ux * entry, 0, -uz * entry)
+
+  let bottom = null
+  for (let i = 0; i < 240 && bottom === null; i++) {
+    updatePlayer(1 / 120)
+    if (P.pos.y <= s.y0 + 0.03) bottom = P.speed
+  }
+  assert(bottom !== null, 'gravity coast never reached the halfpipe flat')
+  assert(bottom > entry + 1, `halfpipe descent should gain speed from gravity (${entry.toFixed(2)} -> ${bottom.toFixed(2)})`)
+}
+
 // A quarter pipe is a launcher, not a staircase. Hitting the lip must throw you
 // above the coping and drop you BACK INTO the transition — riding the tangent
 // out put you on the deck at walking pace, every time. Popping at the lip does

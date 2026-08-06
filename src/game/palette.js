@@ -162,7 +162,7 @@ export const C = {
   railMint: '#8ad8c4',
 
   // props ------------------------------------------------------------------
-  lamp: '#3f9083', // same enamel family as railTeal, two stops down
+  lamp: '#499d8c', // teal enamel, pulled 60% toward the cans' #5c7d78 so the two greens read as one family
   lampGlass: '#ffe9c4',
   benchWood: '#b8926e',
   benchIron: '#584235',

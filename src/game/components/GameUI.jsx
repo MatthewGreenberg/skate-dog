@@ -164,18 +164,6 @@ function PlaytestPill({ onExit }) {
   )
 }
 
-function BowlingObjective() {
-  return (
-    <div className="hud-bowling-objective" aria-label="Objective: smash every can">
-      <TrashIcon />
-      <span>
-        <small>OBJECTIVE</small>
-        <strong>SMASH EVERY CAN</strong>
-      </span>
-    </div>
-  )
-}
-
 // The challenge list. NOT permanent HUD furniture any more — you read it on the
 // start card before the run and behind the ☰ button during it. Eight rows of
 // to-do sat over the park the whole session and nobody reads them while
@@ -226,10 +214,16 @@ function GitHubIcon() {
 // GameLoop. Duck the soundtrack with it (same 0.3 the editor uses — silence
 // reads as broken audio). The unmount path has to clear both, or ending the
 // run with the sheet open freezes the next one / leaves the music ducked.
-function GoalMenu() {
+function GoalMenu({ bowling = false }) {
   const goalsDone = useGame((s) => s.goalsDone)
   const goals = activeGoals()
   const [open, setOpen] = useState(false)
+  const restartRun = () => {
+    resetPlayer()
+    resetGoals()
+    useGame.getState().restart()
+    setOpen(false)
+  }
   useEffect(() => {
     P.paused = open
     setMusicDuck(open ? 0.3 : 1)
@@ -253,11 +247,11 @@ function GoalMenu() {
     <>
       <button
         className={open ? 'hud-menu is-open' : 'hud-menu'}
-        aria-label="Challenges"
+        aria-label={bowling ? 'Pause Dog Bowling' : 'Challenges'}
         onClick={() => setOpen((v) => !v)}
       >
         <span className="hud-menu-bars" aria-hidden="true" />
-        {goalsDone.length}/{goals.length}
+        {bowling ? <span className="hud-menu-label">PAUSE</span> : `${goalsDone.length}/${goals.length}`}
       </button>
       {open && (
         <div className="hud-sheet" onClick={() => setOpen(false)}>
@@ -288,7 +282,7 @@ function GoalMenu() {
                 </a>
               </div>
             </div>
-            <div className="hud-sheet-title">GOALS</div>
+            <div className="hud-sheet-title">{bowling ? 'DOG BOWLING' : 'GOALS'}</div>
             <GoalList />
             {/* the wave has no room next to a thumb-sized jump button, so on
                 touch it lives here instead of the bottom-right corner */}
@@ -300,6 +294,7 @@ function GoalMenu() {
             )}
             <div className="hud-sheet-foot">PAUSED — tap anywhere to resume</div>
             <div className="hud-sheet-home-wrap">
+              <button className="hud-sheet-restart" onClick={restartRun}>RESTART RUN</button>
               <button className="hud-sheet-home" onClick={() => { location.href = '/' }}>HOME</button>
             </div>
           </div>
@@ -927,7 +922,9 @@ export default function GameUI({ onExitTest } = {}) {
         {!PHOTO && !EDIT && <TimePill />}
         {live && EDIT && !runOver && <PlaytestPill onExit={onExitTest} />}
         {live && !TOUCH && <MuteWave />}
-        {live && !PHOTO && !EDIT && !runOver && (cansOnly ? <BowlingObjective /> : <GoalMenu />)}
+        {live && !PHOTO && !EDIT && !runOver && (
+          <GoalMenu bowling={cansOnly} />
+        )}
       </div>
       <TrickPopup />
       {live && TOUCH && !runOver && (

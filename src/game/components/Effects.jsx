@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { P, useGame, on } from '../store.js'
 import { PHOTO, PHOTO_TIME } from '../photo.js'
+import { useSceneSettings } from '../level/levelEdits.js'
 
 // CPU-simulated particle pools. One InstancedMesh per pool, buffers allocated
 // once at module scope, no allocation inside the frame loop. Instances have no
@@ -19,6 +20,7 @@ const SPARK_N = 110
 const TRAIL_N = 40
 const STAR_N = 40 // grind sparkle stream + trick bursts share this pool
 const RING_N = 12
+const SMASH_RING_N = 8
 const STREAK_N = 40
 const TRASH_N = 44 // ~10 scraps per can, so two cans in quick succession fit
 const TAU = Math.PI * 2
@@ -85,6 +87,7 @@ const ringMat = new THREE.MeshBasicMaterial({
   depthWrite: false,
   side: THREE.DoubleSide,
 })
+const smashRingMat = ringMat.clone()
 
 // Litter: a flat crumpled scrap. LIT, not toneMapped-off like the sparks — a
 // bit of rubbish is a real object in the park and has to sit in the same light
@@ -156,6 +159,7 @@ const spark = pool(SPARK_N, false, true)
 const trail = pool(TRAIL_N, true)
 const star = pool(STAR_N, false, true)
 const ring = pool(RING_N, true)
+const smashRing = pool(SMASH_RING_N, true)
 const streak = pool(STREAK_N, true)
 // q holds (axis.x, axis.y, axis.z, spin rate) and `rot` accumulates the phase —
 // a scrap tumbles about one fixed random axis, which is what a flat thing
@@ -259,6 +263,12 @@ function ringAt(x, y, z, size) {
   _q.setFromUnitVectors(YUP, _up.copy(P.up).normalize())
   const i = alloc(ring, x, y, z, 0, 0, 0, 0.35, size)
   _q.toArray(ring.q, i * 4)
+}
+
+function smashRingAt(x, y, z, size) {
+  _q.setFromUnitVectors(YUP, _up.copy(P.up).normalize())
+  const i = alloc(smashRing, x, y, z, 0, 0, 0, 0.35, size)
+  _q.toArray(smashRing.q, i * 4)
 }
 
 // All-gold celebration burst: star fountain + spark scatter + surface
@@ -597,21 +607,21 @@ function stepStars(mesh, dt, camQuat) {
   pushColors(mesh, star)
 }
 
-function stepRings(mesh, dt) {
-  for (let i = 0; i < RING_N; i++) {
-    const a = ring.life[i] - dt
+function stepRings(mesh, dt, source = ring) {
+  for (let i = 0; i < source.n; i++) {
+    const a = source.life[i] - dt
     if (a <= 0) {
-      ring.life[i] = 0
+      source.life[i] = 0
       mesh.setMatrixAt(i, ZERO)
       continue
     }
-    ring.life[i] = a
-    const f = a / ring.max[i]
+    source.life[i] = a
+    const f = a / source.max[i]
     const age = 1 - f
     // expands fast then pops out over the last 15% (no per-instance alpha)
-    const r = ring.size[i] * (0.25 + 2.4 * age) * Math.min(1, f / 0.15)
-    _o.position.set(ring.x[i], ring.y[i], ring.z[i])
-    _o.quaternion.fromArray(ring.q, i * 4)
+    const r = source.size[i] * (0.25 + 2.4 * age) * Math.min(1, f / 0.15)
+    _o.position.set(source.x[i], source.y[i], source.z[i])
+    _o.quaternion.fromArray(source.q, i * 4)
     _o.scale.set(r, 1, r)
     _o.updateMatrix()
     mesh.setMatrixAt(i, _o.matrix)
@@ -644,9 +654,12 @@ export default function Effects() {
   const trailRef = useRef()
   const starRef = useRef()
   const ringRef = useRef()
+  const smashRingRef = useRef()
   const streakRef = useRef()
   const trashRef = useRef()
   const moteRef = useRef()
+  const time = useSceneSettings((s) => s.time)
+  const darkTime = time === 'night' || time === 'neon'
   const t = useRef({ dust: 0, spark: 0, trail: 0, streak: 0, grindT: 0, grindStar: 0, airStar: 0, bigAir: false })
 
   // Must be a layout effect: useFrame subscribes in a layout effect too, so a
@@ -654,7 +667,7 @@ export default function Effects() {
   // three only reads `usage` when it first creates the buffer, so setting it
   // late would silently leave these buffers as STATIC_DRAW forever.
   useLayoutEffect(() => {
-    for (const m of [dustRef.current, sparkRef.current, trailRef.current, starRef.current, ringRef.current, streakRef.current, trashRef.current, moteRef.current]) {
+    for (const m of [dustRef.current, sparkRef.current, trailRef.current, starRef.current, ringRef.current, smashRingRef.current, streakRef.current, trashRef.current, moteRef.current]) {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     }
     // instanceColor is created lazily by setColorAt, but we write the whole
@@ -664,6 +677,11 @@ export default function Effects() {
       m.instanceColor.setUsage(THREE.DynamicDrawUsage)
     }
   }, [])
+
+  useEffect(() => {
+    streakMat.opacity = darkTime ? 0.3 : 0.5
+    smashRingMat.opacity = darkTime ? 0.1 : 0.5
+  }, [darkTime])
 
   useEffect(() => {
     const off = [
@@ -727,7 +745,7 @@ export default function Effects() {
             Math.cos(a) * 1.4, 1.6 + Math.random(), Math.sin(a) * 1.4, 0.09, CAN_COLS)
         }
         for (let i = 0; i < (isLow() ? 5 : 10); i++) trashAt(pos.x, pos.y, pos.z, dx / l, dz / l, 1.6 * k)
-        ringAt(pos.x, pos.y + 0.03, pos.z, 0.65 * k)
+        smashRingAt(pos.x, pos.y + 0.03, pos.z, 0.65 * k)
       }),
       // a completed challenge reads like the last bone: same gold, biggest ring
       on('goal', ({ pos }) => goldBurst(pos, true)),
@@ -863,6 +881,7 @@ export default function Effects() {
     stepTrail(trailRef.current, dt)
     stepStars(starRef.current, dt, state.camera.quaternion)
     stepRings(ringRef.current, dt)
+    stepRings(smashRingRef.current, dt, smashRing)
     stepStreaks(streakRef.current, dt)
     stepTrash(trashRef.current, dt)
     stepAmbient(moteRef.current, PHOTO ? PHOTO_TIME : state.clock.elapsedTime, state.camera, low, dt)
@@ -875,6 +894,7 @@ export default function Effects() {
       <instancedMesh ref={trailRef} args={[trailGeo, trailMat, TRAIL_N]} frustumCulled={false} renderOrder={1} />
       <instancedMesh ref={dustRef} args={[dustGeo, dustMat, DUST_N]} frustumCulled={false} renderOrder={2} />
       <instancedMesh ref={ringRef} args={[ringGeo, ringMat, RING_N]} frustumCulled={false} renderOrder={3} />
+      <instancedMesh ref={smashRingRef} args={[ringGeo, smashRingMat, SMASH_RING_N]} frustumCulled={false} renderOrder={3} />
       <instancedMesh ref={streakRef} args={[streakGeo, streakMat, STREAK_N]} frustumCulled={false} renderOrder={3} />
       <instancedMesh ref={sparkRef} args={[sparkGeo, sparkMat, SPARK_N]} frustumCulled={false} renderOrder={4} />
       <instancedMesh ref={starRef} args={[starGeo, starMat, STAR_N]} frustumCulled={false} renderOrder={5} />

@@ -304,6 +304,11 @@
   top: calc(50% - var(--rim) / 2);
   border-top: var(--rim) solid currentColor;
 }
+.hud-menu-label {
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
 .hud-sheet {
   position: absolute;
   inset: 0;
@@ -420,9 +425,33 @@
   transform: translateY(-1px);
   outline: none;
 }
+.hud-sheet-restart {
+  min-width: calc(var(--u) * 12);
+  padding: calc(var(--u) * 0.7) calc(var(--u) * 1.6);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  background: #ffe14d;
+  color: #43255f;
+  font: inherit;
+  font-size: calc(var(--u) * 0.9);
+  font-weight: 950;
+  letter-spacing: 0.09em;
+  cursor: pointer;
+  box-shadow: 0 calc(var(--u) * 0.24) calc(var(--u) * 0.7) rgba(30, 12, 56, 0.28);
+  transition: transform 0.14s ease, background 0.14s ease;
+}
+.hud-sheet-restart:hover,
+.hud-sheet-restart:focus-visible {
+  background: #fff08a;
+  transform: translateY(-1px);
+  outline: none;
+}
 .hud-sheet-home-wrap {
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  gap: calc(var(--u) * 0.55);
   margin-top: calc(var(--u) * 0.75);
   padding-top: calc(var(--u) * 0.85);
   border-top: 1px solid rgba(255, 255, 255, 0.16);
@@ -523,50 +552,6 @@
   font-variant-numeric: tabular-nums;
   text-shadow: 0 1px 2px var(--ink);
 }
-
-.hud-bowling-objective {
-  position: absolute;
-  top: var(--edge);
-  right: var(--edge);
-  display: flex;
-  align-items: center;
-  gap: calc(var(--u) * 0.65);
-  height: calc(var(--u) * 3.5);
-  padding: 0 calc(var(--u) * 1.05) 0 calc(var(--u) * 0.82);
-  border: var(--rim) solid rgba(255, 220, 105, 0.82);
-  border-radius: 999px;
-  background: linear-gradient(135deg, rgba(89, 47, 154, 0.86), rgba(52, 26, 99, 0.91));
-  color: #fff;
-  box-shadow: 0 calc(var(--u) * 0.18) calc(var(--u) * 0.5) rgba(36, 14, 62, 0.28);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-.hud-bowling-objective > span {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.02;
-}
-.hud-bowling-objective small {
-  color: #ffdd69;
-  font-size: calc(var(--u) * 0.5);
-  font-weight: 1000;
-  letter-spacing: 0.14em;
-}
-.hud-bowling-objective strong {
-  margin-top: calc(var(--u) * 0.15);
-  font-size: calc(var(--u) * 0.74);
-  font-weight: 1000;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
-}
-@media (pointer: coarse) {
-  .hud-bowling-objective { --u: calc(var(--u0) * 0.74); }
-}
-@media (max-width: 620px) {
-  .hud-bowling-objective strong { display: none; }
-  .hud-bowling-objective small { font-size: calc(var(--u) * 0.58); }
-}
-
 
 /* ------------------------------------------------------------ trick */
 .hud-trick {
